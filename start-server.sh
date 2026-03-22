@@ -131,6 +131,47 @@ upgrade() {
     start
 }
 
+# 自动升级（用于定时任务，只有发现更新才执行）
+auto_upgrade() {
+    # 静默模式，不输出颜色
+    print_info "检查更新..."
+
+    # 获取当前 commit
+    local current_commit=$(git rev-parse HEAD 2>/dev/null)
+    if [ -z "$current_commit" ]; then
+        print_error "无法获取当前版本"
+        exit 1
+    fi
+
+    # 拉取远程信息（不合并）
+    git fetch origin main --quiet 2>/dev/null
+
+    # 获取远程最新 commit
+    local remote_commit=$(git rev-parse origin/main 2>/dev/null)
+    if [ -z "$remote_commit" ]; then
+        print_error "无法获取远程版本"
+        exit 1
+    fi
+
+    # 比较版本
+    if [ "$current_commit" = "$remote_commit" ]; then
+        print_info "已是最新版本，无需更新"
+        exit 0
+    fi
+
+    # 有更新，执行升级
+    print_info "发现新版本，正在升级..."
+    echo "  本地: ${current_commit:0:7}"
+    echo "  远程: ${remote_commit:0:7}"
+
+    stop_process
+    git pull origin main --quiet
+    build
+    start
+
+    print_step "升级完成"
+}
+
 # 重启
 restart() {
     print_info "正在重启服务器..."
@@ -164,14 +205,15 @@ help() {
     echo "用法: $0 <命令>"
     echo ""
     echo "命令:"
-    echo "  start     编译并启动服务器"
-    echo "  stop      停止服务器"
-    echo "  restart   重新编译并重启服务器"
-    echo "  upgrade   拉取最新代码并重启服务器"
-    echo "  status    查看服务器状态"
-    echo "  logs      查看服务器日志"
-    echo "  build     仅编译服务器"
-    echo "  pull      仅拉取最新代码"
+    echo "  start        编译并启动服务器"
+    echo "  stop         停止服务器"
+    echo "  restart      重新编译并重启服务器"
+    echo "  upgrade      拉取最新代码并重启服务器"
+    echo "  auto-upgrade 检查更新，有新版本才升级（用于定时任务）"
+    echo "  status       查看服务器状态"
+    echo "  logs         查看服务器日志"
+    echo "  build        仅编译服务器"
+    echo "  pull         仅拉取最新代码"
     echo ""
 }
 
@@ -189,6 +231,9 @@ case "${1:-}" in
         ;;
     upgrade)
         upgrade
+        ;;
+    auto-upgrade)
+        auto_upgrade
         ;;
     status)
         status

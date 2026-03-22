@@ -202,6 +202,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		}
 
 		// 捕获当前屏幕内容并发送给用户（解决刷新后黑屏问题）
+		// 使用带 ANSI 转义序列的捕获
 		if output, err := c.tmux.CaptureOutput(); err == nil && output != "" {
 			outputMsg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
 				Data: output,
@@ -209,6 +210,9 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 			outputMsg.To = msg.From
 			c.send <- outputMsg
 		}
+
+		// 发送 Ctrl+L 让 tmux 重绘屏幕（确保光标位置正确）
+		c.tmux.Write("\x0c")
 
 		// 启动转发
 		go c.startForwarding(msg.From)

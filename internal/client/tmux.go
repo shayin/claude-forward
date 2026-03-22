@@ -214,12 +214,13 @@ func (t *TmuxManager) SendKeys(keys string) error {
 	return cmd.Run()
 }
 
-// CaptureOutput 捕获当前屏幕输出（用于调试）
+// CaptureOutput 捕获当前屏幕输出（包含 ANSI 转义序列）
 func (t *TmuxManager) CaptureOutput() (string, error) {
 	if !t.useTmux {
 		return "", fmt.Errorf("tmux not available")
 	}
-	cmd := exec.Command("tmux", "capture-pane", "-t", t.config.SessionName, "-p")
+	// 使用 -e 参数保留 ANSI 转义序列，这样 xterm.js 可以正确渲染
+	cmd := exec.Command("tmux", "capture-pane", "-t", t.config.SessionName, "-p", "-e")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
