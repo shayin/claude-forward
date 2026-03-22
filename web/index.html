@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Claude Forward</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #333;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #00d4ff;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+
+        .status-dot.connected {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        .status-dot.connecting {
+            background: #ffaa00;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .client-list {
+            margin-bottom: 20px;
+        }
+
+        .client-list h2 {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #888;
+        }
+
+        .client-item {
+            background: #16213e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .client-item:hover {
+            border-color: #00d4ff;
+            background: #1a2744;
+        }
+
+        .client-item.active {
+            border-color: #00ff88;
+            background: #1a2f1a;
+        }
+
+        .client-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .client-id {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .terminal-container {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .terminal-container.active {
+            display: block;
+        }
+
+        #terminal {
+            padding: 10px;
+            height: calc(100vh - 300px);
+            min-height: 400px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            background: #16213e;
+            border-top: 1px solid #333;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #00d4ff;
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            background: #00b8e6;
+        }
+
+        .btn-danger {
+            background: #ff4757;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background: #ff3344;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state h2 {
+            margin-bottom: 10px;
+        }
+
+        .config-form {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+
+        .cert-notice {
+            background: #2a1f1a;
+            border: 1px solid #ff6600;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .cert-notice.show {
+            display: block;
+        }
+
+        .cert-notice h3 {
+            color: #ff6600;
+            margin-bottom: 10px;
+        }
+
+        .cert-notice p {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .cert-notice code {
+            background: #1a1a2e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            #terminal {
+                height: calc(100vh - 350px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Claude Forward</h1>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">未连接</span>
+            </div>
+        </div>
+
+        <div class="cert-notice" id="certNotice">
+            <h3>证书警告</h3>
+            <p>如果您看到浏览器证书警告，这是因为服务器使用了自签名证书。</p>
+            <p>请点击"高级" → "继续访问"来信任此证书。</p>
+        </div>
+
+        <div class="config-form" id="configForm">
+            <div class="form-group">
+                <label>服务器地址</label>
+                <input type="text" id="serverUrl" placeholder="wss://your-server:8765">
+            </div>
+            <div class="form-group">
+                <label>Token</label>
+                <input type="password" id="token" placeholder="your-secret-token">
+            </div>
+            <button class="btn btn-primary" onclick="connect()">连接</button>
+        </div>
+
+        <div class="client-list" id="clientList" style="display: none;">
+            <h2>可用客户端</h2>
+            <div id="clients"></div>
+        </div>
+
+        <div class="terminal-container" id="terminalContainer">
+            <div id="terminal"></div>
+            <div class="toolbar">
+                <button class="btn btn-danger" onclick="detach()">断开连接</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/addons/web-links/web-links.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/addons/fit/fit.min.js"></script>
+    <script>
+        let ws = null;
+        let term = null;
+        let fitAddon = null;
+        let attachedClient = null;
+
+        // 检查 URL 参数
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                server: params.get('server') || localStorage.getItem('cf_server') || '',
+                token: params.get('token') || localStorage.getItem('cf_token') || ''
+            };
+        }
+
+        // 初始化
+        function init() {
+            const params = getUrlParams();
+            if (params.server) {
+                document.getElementById('serverUrl').value = params.server;
+            }
+            if (params.token) {
+                document.getElementById('token').value = params.token;
+            }
+
+            // 检查是否是 HTTPS
+            if (location.protocol === 'https:') {
+                document.getElementById('certNotice').classList.add('show');
+            }
+        }
+
+        // 连接服务器
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const token = document.getElementById('token').value;
+
+            if (!serverUrl || !token) {
+                alert('请填写服务器地址和 Token');
+                return;
+            }
+
+            // 保存配置
+            localStorage.setItem('cf_server', serverUrl);
+            localStorage.setItem('cf_token', token);
+
+            updateStatus('connecting', '连接中...');
+
+            const wsUrl = `${serverUrl}/ws?token=${token}`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                updateStatus('connected', '已连接');
+                // 请求客户端列表
+                sendMessage({ type: 'list' });
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                updateStatus('', '连接已断开');
+                document.getElementById('clientList').style.display = 'none';
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('', '连接错误');
+            };
+        }
+
+        // 处理消息
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'list':
+                    showClients(msg.payload.clients);
+                    break;
+                case 'attached':
+                    showTerminal();
+                    break;
+                case 'detached':
+                    hideTerminal();
+                    break;
+                case 'output':
+                    if (term && msg.payload && msg.payload.data) {
+                        term.write(msg.payload.data);
+                    }
+                    break;
+                case 'error':
+                    alert('错误: ' + (msg.payload?.message || '未知错误'));
+                    break;
+            }
+        }
+
+        // 显示客户端列表
+        function showClients(clients) {
+            const container = document.getElementById('clients');
+            document.getElementById('clientList').style.display = 'block';
+
+            if (!clients || clients.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>没有可用的客户端</h2>
+                        <p>请确保本地客户端已启动并连接到服务器</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = clients.map(client => `
+                <div class="client-item ${attachedClient === client.id ? 'active' : ''}" onclick="attach('${client.id}')">
+                    <div class="client-name">${client.name || client.id}</div>
+                    <div class="client-id">ID: ${client.id}</div>
+                </div>
+            `).join('');
+        }
+
+        // 附加到客户端
+        function attach(clientId) {
+            attachedClient = clientId;
+            sendMessage({
+                type: 'attach',
+                payload: { client_id: clientId }
+            });
+        }
+
+        // 断开连接
+        function detach() {
+            sendMessage({ type: 'detach' });
+            attachedClient = null;
+            hideTerminal();
+        }
+
+        // 显示终端
+        function showTerminal() {
+            document.getElementById('terminalContainer').classList.add('active');
+            document.getElementById('configForm').style.display = 'none';
+            document.getElementById('clientList').style.display = 'none';
+
+            // 初始化终端
+            if (!term) {
+                term = new Terminal({
+                    theme: {
+                        background: '#000',
+                        foreground: '#fff',
+                        cursor: '#00ff88'
+                    },
+                    fontSize: 14,
+                    fontFamily: 'Monaco, Menlo, monospace',
+                    cursorBlink: true
+                });
+                term.open(document.getElementById('terminal'));
+                term.loadAddon(new WebLinksAddon.WebLinksAddon());
+                fitAddon = new FitAddon.FitAddon();
+                term.loadAddon(fitAddon);
+
+                // 输入处理
+                term.onData((data) => {
+                    sendMessage({
+                        type: 'input',
+                        payload: { data: data }
+                    });
+                });
+
+                // 窗口大小变化
+                window.addEventListener('resize', () => {
+                    fitTerminal();
+                });
+            }
+
+            setTimeout(fitTerminal, 100);
+        }
+
+        // 隐藏终端
+        function hideTerminal() {
+            document.getElementById('terminalContainer').classList.remove('active');
+            document.getElementById('clientList').style.display = 'block';
+            if (term) {
+                term.clear();
+            }
+        }
+
+        // 调整终端大小
+        function fitTerminal() {
+            if (term && fitAddon) {
+                try {
+                    fitAddon.fit();
+                    sendMessage({
+                        type: 'resize',
+                        payload: {
+                            cols: term.cols,
+                            rows: term.rows
+                        }
+                    });
+                } catch (e) {
+                    console.error('Fit error:', e);
+                }
+            }
+        }
+
+        // 发送消息
+        function sendMessage(msg) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(msg));
+            }
+        }
+
+        // 更新状态
+        function updateStatus(status, text) {
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            dot.className = 'status-dot';
+            if (status) {
+                dot.classList.add(status);
+            }
+            statusText.textContent = text;
+        }
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>

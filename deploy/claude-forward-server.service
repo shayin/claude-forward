@@ -1,0 +1,19 @@
+[Unit]
+Description=Claude Forward Server
+After=network.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/opt/claude-forward
+ExecStart=/opt/claude-forward/server /opt/claude-forward/server.yaml
+Restart=always
+RestartSec=5
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
