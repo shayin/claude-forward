@@ -360,7 +360,7 @@
 
                 // 检查是否需要恢复 attach 状态
                 const savedClient = localStorage.getItem('cf_attached_client');
-                if (isReconnecting && savedClient) {
+                if (savedClient) {
                     showDebug('恢复 attach 状态: ' + savedClient);
                     attachedClient = savedClient;
                     // 直接 attach 到之前的客户端
