@@ -4,6 +4,9 @@
 
 set -e
 
+# 设置 PATH（crontab 环境可能没有这些路径）
+export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
