@@ -201,15 +201,19 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 			log.Printf("Failed to attach to tmux: %v", err)
 		}
 
-		// 启动转发（必须先启动，才能接收重绘输出）
+		// 先发送当前屏幕内容给前端（在启动转发之前）
+		// 这样可以确保刷新页面后能立即显示内容
+		if output, err := c.tmux.CaptureOutput(); err == nil && output != "" {
+			outputMsg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
+				Data: output,
+			})
+			outputMsg.To = msg.From
+			c.send <- outputMsg
+			log.Printf("Sent captured screen content: %d bytes", len(output))
+		}
+
+		// 启动转发
 		go c.startForwarding(msg.From)
-
-		// 短暂延迟，确保 forwarding 已启动
-		time.Sleep(100 * time.Millisecond)
-
-		// 通过 tmux send-keys 发送 Ctrl+L 触发屏幕重绘
-		// 这样重绘输出会通过 PTY 流正常传输到前端
-		c.tmux.SendKeys("C-l")
 
 	case protocol.TypeDetach:
 		log.Printf("User detached: %s", msg.From)

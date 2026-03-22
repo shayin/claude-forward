@@ -302,6 +302,7 @@
         let fitAddon = null;
         let attachedClient = null;
         let isReconnecting = false; // 是否正在重连
+        let pendingOutput = []; // 待处理的输出缓冲区（解决消息时序问题）
 
         // 检查 URL 参数
         function getUrlParams() {
@@ -438,8 +439,13 @@
                     hideTerminal();
                     break;
                 case 'output':
-                    if (term && msg.payload && msg.payload.data) {
-                        term.write(msg.payload.data);
+                    if (msg.payload && msg.payload.data) {
+                        if (term) {
+                            term.write(msg.payload.data);
+                        } else {
+                            // 终端还没创建，缓存输出
+                            pendingOutput.push(msg.payload.data);
+                        }
                     }
                     break;
                 case 'error':
@@ -582,6 +588,12 @@
                 fitTerminal();
             });
 
+            // 处理缓存的输出（解决 output 消息先于 attached 消息到达的时序问题）
+            if (pendingOutput.length > 0) {
+                pendingOutput.forEach(data => term.write(data));
+                pendingOutput = [];
+            }
+
             setTimeout(fitTerminal, 100);
         }
 
@@ -593,6 +605,8 @@
             if (term) {
                 term.clear();
             }
+            // 清空待处理的输出
+            pendingOutput = [];
         }
 
         // 调整终端大小
