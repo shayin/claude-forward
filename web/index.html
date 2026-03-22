@@ -483,74 +483,40 @@
 
                 // 移动端软键盘支持
                 const mobileInput = document.getElementById('mobileInput');
-                let lastKeyTime = 0;
 
                 // 点击终端时聚焦 input
                 term.element.addEventListener('click', () => {
                     mobileInput.focus();
                 });
 
-                // 监听 keydown - 处理特殊键
+                // 特殊键映射
+                const specialKeys = {
+                    'Enter': '\r',
+                    'Backspace': '\x7f',
+                    'Tab': '\t',
+                    'Escape': '\x1b',
+                    'ArrowUp': '\x1b[A',
+                    'ArrowDown': '\x1b[B',
+                    'ArrowLeft': '\x1b[D',
+                    'ArrowRight': '\x1b[C',
+                    'Delete': '\x1b[3~',
+                    'Home': '\x1b[H',
+                    'End': '\x1b[F'
+                };
+
+                // 监听 keydown - 只处理特殊键
                 mobileInput.addEventListener('keydown', (e) => {
-                    let sendData = null;
-
-                    // 只处理特殊键，普通字符让 input 事件处理
-                    switch (e.key) {
-                        case 'Enter':
-                            sendData = '\r';
-                            break;
-                        case 'Backspace':
-                            sendData = '\x7f';
-                            break;
-                        case 'Tab':
-                            sendData = '\t';
-                            break;
-                        case 'Escape':
-                            sendData = '\x1b';
-                            break;
-                        case 'ArrowUp':
-                            sendData = '\x1b[A';
-                            break;
-                        case 'ArrowDown':
-                            sendData = '\x1b[B';
-                            break;
-                        case 'ArrowLeft':
-                            sendData = '\x1b[D';
-                            break;
-                        case 'ArrowRight':
-                            sendData = '\x1b[C';
-                            break;
-                        case 'Delete':
-                            sendData = '\x1b[3~';
-                            break;
-                        case 'Home':
-                            sendData = '\x1b[H';
-                            break;
-                        case 'End':
-                            sendData = '\x1b[F';
-                            break;
-                    }
-
-                    if (sendData) {
+                    if (specialKeys[e.key]) {
                         e.preventDefault();
                         sendMessage({
                             type: 'input',
-                            payload: { data: sendData }
+                            payload: { data: specialKeys[e.key] }
                         });
                     }
-
-                    // 记录按键时间，用于 input 事件去重
-                    lastKeyTime = Date.now();
                 });
 
                 // 监听 input 事件处理普通字符输入
                 mobileInput.addEventListener('input', (e) => {
-                    // 如果刚刚处理过 keydown，跳过（避免重复）
-                    if (Date.now() - lastKeyTime < 50) {
-                        mobileInput.value = '';
-                        return;
-                    }
-
                     if (e.data) {
                         sendMessage({
                             type: 'input',
