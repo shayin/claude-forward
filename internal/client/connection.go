@@ -201,21 +201,15 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 			log.Printf("Failed to attach to tmux: %v", err)
 		}
 
-		// 捕获当前屏幕内容并发送给用户（解决刷新后黑屏问题）
-		// 使用带 ANSI 转义序列的捕获
-		if output, err := c.tmux.CaptureOutput(); err == nil && output != "" {
-			outputMsg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
-				Data: output,
-			})
-			outputMsg.To = msg.From
-			c.send <- outputMsg
-		}
-
-		// 发送 Ctrl+L 让 tmux 重绘屏幕（确保光标位置正确）
-		c.tmux.Write("\x0c")
-
-		// 启动转发
+		// 启动转发（必须先启动，才能接收重绘输出）
 		go c.startForwarding(msg.From)
+
+		// 短暂延迟，确保 forwarding 已启动
+		time.Sleep(100 * time.Millisecond)
+
+		// 通过 tmux send-keys 发送 Ctrl+L 触发屏幕重绘
+		// 这样重绘输出会通过 PTY 流正常传输到前端
+		c.tmux.SendKeys("C-l")
 
 	case protocol.TypeDetach:
 		log.Printf("User detached: %s", msg.From)
