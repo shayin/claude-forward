@@ -14,6 +14,7 @@ NC='\033[0m'
 # 配置
 PID_FILE="/tmp/claude-forward-client.pid"
 LOG_FILE="/tmp/claude-forward-client.log"
+CONFIG_TPL="configs/client.yaml.tpl"
 CONFIG_FILE="configs/client.yaml"
 BINARY="bin/client"
 
@@ -61,6 +62,13 @@ stop_process() {
     fi
 }
 
+# 拉取最新代码
+pull() {
+    print_info "正在拉取最新代码..."
+    git pull origin main
+    print_step "代码已更新"
+}
+
 # 编译
 build() {
     print_info "正在编译客户端..."
@@ -77,9 +85,15 @@ start() {
 
     # 检查配置文件
     if [ ! -f "$CONFIG_FILE" ]; then
-        print_error "配置文件不存在: $CONFIG_FILE"
-        print_info "请先创建配置文件: cp configs/client.yaml.example $CONFIG_FILE"
-        exit 1
+        if [ -f "$CONFIG_TPL" ]; then
+            print_info "从模板创建配置文件..."
+            cp "$CONFIG_TPL" "$CONFIG_FILE"
+            print_step "配置文件已创建: $CONFIG_FILE"
+            print_warn "请编辑配置文件填写你的服务器信息"
+        else
+            print_error "配置模板不存在: $CONFIG_TPL"
+            exit 1
+        fi
     fi
 
     # 检查二进制文件
@@ -106,6 +120,15 @@ start() {
         rm -f "$PID_FILE"
         exit 1
     fi
+}
+
+# 拉取并重启
+upgrade() {
+    print_info "正在升级客户端..."
+    stop_process
+    pull
+    build
+    start
 }
 
 # 重启
@@ -144,9 +167,11 @@ help() {
     echo "  start     编译并启动客户端"
     echo "  stop      停止客户端"
     echo "  restart   重新编译并重启客户端"
+    echo "  upgrade   拉取最新代码并重启客户端"
     echo "  status    查看客户端状态"
     echo "  logs      查看客户端日志"
     echo "  build     仅编译客户端"
+    echo "  pull      仅拉取最新代码"
     echo ""
 }
 
@@ -162,6 +187,9 @@ case "${1:-}" in
     restart)
         restart
         ;;
+    upgrade)
+        upgrade
+        ;;
     status)
         status
         ;;
@@ -170,6 +198,9 @@ case "${1:-}" in
         ;;
     build)
         build
+        ;;
+    pull)
+        pull
         ;;
     *)
         help

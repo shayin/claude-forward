@@ -196,7 +196,14 @@ install_files() {
 generate_config() {
     print_info "生成配置文件..."
 
-    cat > "$INSTALL_DIR/server.yaml" << EOF
+    # 从模板复制并替换变量
+    if [ -f "$CONFIGS_DIR/server.yaml.tpl" ]; then
+        sed -e "s/your-secret-token-here/$TOKEN/g" \
+            -e "s/port: 6022/port: $PORT/g" \
+            "$CONFIGS_DIR/server.yaml.tpl" > "$INSTALL_DIR/server.yaml"
+    else
+        # 如果模板不存在，生成默认配置
+        cat > "$INSTALL_DIR/server.yaml" << EOF
 # Claude Forward 服务器配置
 # 生成时间: $(date)
 
@@ -223,6 +230,7 @@ logging:
   max_days: 7
   log_level: "info"
 EOF
+    fi
 
     # 设置权限
     chmod 600 "$INSTALL_DIR/server.yaml"
@@ -232,7 +240,14 @@ EOF
 
 # 生成客户端配置示例
 generate_client_config() {
-    cat > "$INSTALL_DIR/client.yaml.example" << EOF
+    # 从模板复制并替换变量
+    if [ -f "$CONFIGS_DIR/client.yaml.tpl" ]; then
+        sed -e "s|wss://your-server-ip:6022|wss://$SERVER_IP:$PORT|g" \
+            -e "s/your-secret-token-here/$TOKEN/g" \
+            "$CONFIGS_DIR/client.yaml.tpl" > "$INSTALL_DIR/client.yaml.example"
+    else
+        # 如果模板不存在，生成默认配置
+        cat > "$INSTALL_DIR/client.yaml.example" << EOF
 # Claude Forward 客户端配置
 # 复制到本地电脑使用
 
@@ -251,6 +266,7 @@ tmux:
   auto_start: true
   shell: "/bin/bash"
 EOF
+    fi
 
     print_step "客户端配置示例已生成"
 }

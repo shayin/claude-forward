@@ -37,3 +37,7 @@ Thumbs.db
 configs/local/
 *.local.yaml
 test-*.yaml
+
+# Generated config files (templates are tracked)
+configs/server.yaml
+configs/client.yaml
