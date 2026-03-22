@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Claude Forward</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.18.0/css/xterm.css">
     <style>
         * {
             margin: 0;
@@ -285,9 +285,9 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@4.18.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@4.18.0/addons/web-links/web-links.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@4.18.0/addons/fit/fit.min.js"></script>
     <script>
         let ws = null;
         let term = null;
@@ -441,8 +441,8 @@
                     cursorBlink: true
                 });
                 term.open(document.getElementById('terminal'));
-                term.loadAddon(new WebLinksAddon());
-                fitAddon = new FitAddon();
+                term.loadAddon(new WebLinksAddon.WebLinksAddon());
+                fitAddon = new FitAddon.FitAddon();
                 term.loadAddon(fitAddon);
 
                 // 输入处理
