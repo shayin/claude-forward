@@ -13,13 +13,15 @@ import (
 
 // Client 客户端
 type Client struct {
-	config   *Config
-	conn     *websocket.Conn
-	send     chan *protocol.Message
-	tmux     *TmuxManager
-	mu       sync.Mutex
-	ctx      context.Context
-	cancel   context.CancelFunc
+	config        *Config
+	conn          *websocket.Conn
+	send          chan *protocol.Message
+	tmux          *TmuxManager
+	mu            sync.Mutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	forwardCancel context.CancelFunc // 用于停止 forwarding goroutine
+	forwardMu     sync.Mutex
 }
 
 // NewClient 创建客户端
@@ -190,6 +192,10 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 	case protocol.TypeAttach:
 		// 用户请求连接
 		log.Printf("User attached: %s", msg.From)
+
+		// 停止之前的 forwarding goroutine
+		c.stopForwarding()
+
 		// 连接到 tmux 会话
 		if err := c.tmux.Attach(); err != nil {
 			log.Printf("Failed to attach to tmux: %v", err)
@@ -199,6 +205,8 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 
 	case protocol.TypeDetach:
 		log.Printf("User detached: %s", msg.From)
+		// 停止 forwarding
+		c.stopForwarding()
 		// 关闭 tmux 连接
 		c.tmux.Close()
 
@@ -223,11 +231,17 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 
 // startForwarding 开始转发终端输出
 func (c *Client) startForwarding(userID string) {
+	// 创建独立的 context 用于此 forwarding 会话
+	c.forwardMu.Lock()
+	ctx, cancel := context.WithCancel(c.ctx)
+	c.forwardCancel = cancel
+	c.forwardMu.Unlock()
+
 	buf := make([]byte, 4096)
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -245,5 +259,16 @@ func (c *Client) startForwarding(userID string) {
 			msg.To = userID
 			c.send <- msg
 		}
+	}
+}
+
+// stopForwarding 停止 forwarding goroutine
+func (c *Client) stopForwarding() {
+	c.forwardMu.Lock()
+	defer c.forwardMu.Unlock()
+
+	if c.forwardCancel != nil {
+		c.forwardCancel()
+		c.forwardCancel = nil
 	}
 }

@@ -86,8 +86,24 @@ func (t *TmuxManager) Attach() error {
 	t.ptyMu.Lock()
 	defer t.ptyMu.Unlock()
 
+	// 检查 PTY 是否仍然有效（进程是否还在运行）
 	if t.pty != nil {
-		return nil
+		if t.cmd != nil && t.cmd.Process != nil {
+			// 检查进程是否已经退出
+			if err := t.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+				// 进程已退出，清理旧连接
+				t.pty.Close()
+				t.pty = nil
+				t.cmd = nil
+			} else {
+				// 进程仍在运行，直接返回
+				return nil
+			}
+		} else {
+			// 没有 cmd 或进程，清理旧连接
+			t.pty.Close()
+			t.pty = nil
+		}
 	}
 
 	shell := t.config.Shell
