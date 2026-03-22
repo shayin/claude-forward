@@ -301,6 +301,7 @@
         let term = null;
         let fitAddon = null;
         let attachedClient = null;
+        let isReconnecting = false; // 是否正在重连
 
         // 检查 URL 参数
         function getUrlParams() {
@@ -356,8 +357,22 @@
             ws.onopen = () => {
                 showDebug('WebSocket 已连接');
                 updateStatus('connected', '已连接');
-                // 请求客户端列表
-                sendMessage({ type: 'list' });
+
+                // 检查是否需要恢复 attach 状态
+                const savedClient = localStorage.getItem('cf_attached_client');
+                if (isReconnecting && savedClient) {
+                    showDebug('恢复 attach 状态: ' + savedClient);
+                    attachedClient = savedClient;
+                    // 直接 attach 到之前的客户端
+                    sendMessage({
+                        type: 'attach',
+                        payload: { client_id: savedClient }
+                    });
+                    isReconnecting = false;
+                } else {
+                    // 请求客户端列表
+                    sendMessage({ type: 'list' });
+                }
             };
 
             ws.onmessage = (event) => {
@@ -369,7 +384,23 @@
             ws.onclose = (event) => {
                 showDebug('连接关闭: code=' + event.code + ', reason=' + event.reason);
                 updateStatus('', '连接已断开');
-                document.getElementById('clientList').style.display = 'none';
+
+                // 如果之前有 attach 的客户端，保存到 localStorage 以便重连后恢复
+                if (attachedClient) {
+                    localStorage.setItem('cf_attached_client', attachedClient);
+                    isReconnecting = true;
+                    showDebug('保存 attach 状态，准备重连: ' + attachedClient);
+
+                    // 3秒后自动重连
+                    setTimeout(() => {
+                        if (isReconnecting) {
+                            showDebug('自动重连中...');
+                            connect();
+                        }
+                    }, 3000);
+                } else {
+                    document.getElementById('clientList').style.display = 'none';
+                }
             };
 
             ws.onerror = (error) => {
@@ -395,9 +426,15 @@
                     showClients(msg.payload.clients);
                     break;
                 case 'attached':
+                    // 保存 attach 状态
+                    localStorage.setItem('cf_attached_client', attachedClient);
                     showTerminal();
                     break;
                 case 'detached':
+                    // 清除 attach 状态
+                    attachedClient = null;
+                    isReconnecting = false;
+                    localStorage.removeItem('cf_attached_client');
                     hideTerminal();
                     break;
                 case 'output':
@@ -406,6 +443,11 @@
                     }
                     break;
                 case 'error':
+                    // 如果是 attach 失败，清除保存的状态
+                    if (msg.payload?.message?.includes('not found')) {
+                        localStorage.removeItem('cf_attached_client');
+                        isReconnecting = false;
+                    }
                     alert('错误: ' + (msg.payload?.message || '未知错误'));
                     break;
             }
@@ -447,6 +489,9 @@
         function detach() {
             sendMessage({ type: 'detach' });
             attachedClient = null;
+            isReconnecting = false;
+            // 清除保存的 attach 状态
+            localStorage.removeItem('cf_attached_client');
             hideTerminal();
         }
 
@@ -456,81 +501,86 @@
             document.getElementById('configForm').style.display = 'none';
             document.getElementById('clientList').style.display = 'none';
 
-            // 初始化终端
-            if (!term) {
-                term = new Terminal({
-                    theme: {
-                        background: '#000',
-                        foreground: '#fff',
-                        cursor: '#00ff88'
-                    },
-                    fontSize: 14,
-                    fontFamily: 'Monaco, Menlo, monospace',
-                    cursorBlink: true
-                });
-                term.open(document.getElementById('terminal'));
-                term.loadAddon(new WebLinksAddon.WebLinksAddon());
-                fitAddon = new FitAddon.FitAddon();
-                term.loadAddon(fitAddon);
+            // 初始化终端（每次重新创建以确保干净状态）
+            if (term) {
+                // 销毁旧终端
+                term.dispose();
+                term = null;
+                fitAddon = null;
+            }
 
-                // 输入处理
-                term.onData((data) => {
+            term = new Terminal({
+                theme: {
+                    background: '#000',
+                    foreground: '#fff',
+                    cursor: '#00ff88'
+                },
+                fontSize: 14,
+                fontFamily: 'Monaco, Menlo, monospace',
+                cursorBlink: true
+            });
+            term.open(document.getElementById('terminal'));
+            term.loadAddon(new WebLinksAddon.WebLinksAddon());
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+
+            // 输入处理
+            term.onData((data) => {
+                sendMessage({
+                    type: 'input',
+                    payload: { data: data }
+                });
+            });
+
+            // 移动端软键盘支持
+            const mobileInput = document.getElementById('mobileInput');
+
+            // 点击终端时聚焦 input
+            term.element.addEventListener('click', () => {
+                mobileInput.focus();
+            });
+
+            // 特殊键映射
+            const specialKeys = {
+                'Enter': '\r',
+                'Backspace': '\x7f',
+                'Tab': '\t',
+                'Escape': '\x1b',
+                'ArrowUp': '\x1b[A',
+                'ArrowDown': '\x1b[B',
+                'ArrowLeft': '\x1b[D',
+                'ArrowRight': '\x1b[C',
+                'Delete': '\x1b[3~',
+                'Home': '\x1b[H',
+                'End': '\x1b[F'
+            };
+
+            // 监听 keydown - 只处理特殊键
+            mobileInput.addEventListener('keydown', (e) => {
+                if (specialKeys[e.key]) {
+                    e.preventDefault();
                     sendMessage({
                         type: 'input',
-                        payload: { data: data }
+                        payload: { data: specialKeys[e.key] }
                     });
-                });
+                }
+            });
 
-                // 移动端软键盘支持
-                const mobileInput = document.getElementById('mobileInput');
+            // 监听 input 事件处理普通字符输入
+            mobileInput.addEventListener('input', (e) => {
+                if (e.data) {
+                    sendMessage({
+                        type: 'input',
+                        payload: { data: e.data }
+                    });
+                }
+                mobileInput.value = '';
+            });
 
-                // 点击终端时聚焦 input
-                term.element.addEventListener('click', () => {
-                    mobileInput.focus();
-                });
-
-                // 特殊键映射
-                const specialKeys = {
-                    'Enter': '\r',
-                    'Backspace': '\x7f',
-                    'Tab': '\t',
-                    'Escape': '\x1b',
-                    'ArrowUp': '\x1b[A',
-                    'ArrowDown': '\x1b[B',
-                    'ArrowLeft': '\x1b[D',
-                    'ArrowRight': '\x1b[C',
-                    'Delete': '\x1b[3~',
-                    'Home': '\x1b[H',
-                    'End': '\x1b[F'
-                };
-
-                // 监听 keydown - 只处理特殊键
-                mobileInput.addEventListener('keydown', (e) => {
-                    if (specialKeys[e.key]) {
-                        e.preventDefault();
-                        sendMessage({
-                            type: 'input',
-                            payload: { data: specialKeys[e.key] }
-                        });
-                    }
-                });
-
-                // 监听 input 事件处理普通字符输入
-                mobileInput.addEventListener('input', (e) => {
-                    if (e.data) {
-                        sendMessage({
-                            type: 'input',
-                            payload: { data: e.data }
-                        });
-                    }
-                    mobileInput.value = '';
-                });
-
-                // 窗口大小变化
-                window.addEventListener('resize', () => {
-                    fitTerminal();
-                });
-            }
+            // 窗口大小变化
+            window.addEventListener('resize', () => {
+                fitTerminal();
+            });
 
             setTimeout(fitTerminal, 100);
         }
@@ -538,6 +588,7 @@
         // 隐藏终端
         function hideTerminal() {
             document.getElementById('terminalContainer').classList.remove('active');
+            document.getElementById('configForm').style.display = 'block';
             document.getElementById('clientList').style.display = 'block';
             if (term) {
                 term.clear();
