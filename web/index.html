@@ -263,13 +263,19 @@
         <div class="config-form" id="configForm">
             <div class="form-group">
                 <label>服务器地址</label>
-                <input type="text" id="serverUrl" placeholder="wss://your-server:8765">
+                <input type="text" id="serverUrl" placeholder="ws://your-server:8765">
             </div>
             <div class="form-group">
                 <label>Token</label>
                 <input type="password" id="token" placeholder="your-secret-token">
             </div>
             <button class="btn btn-primary" onclick="connect()">连接</button>
+
+            <!-- 调试面板 -->
+            <div id="debugPanel" style="margin-top: 15px; padding: 10px; background: #1a1a2e; border-radius: 4px; font-size: 12px; max-height: 150px; overflow-y: auto;">
+                <div style="color: #888; margin-bottom: 5px;">调试日志:</div>
+                <div id="debugLog" style="color: #ff6600;"></div>
+            </div>
         </div>
 
         <div class="client-list" id="clientList" style="display: none;">
@@ -336,20 +342,30 @@
             updateStatus('connecting', '连接中...');
 
             const wsUrl = `${serverUrl}/ws?token=${token}`;
-            ws = new WebSocket(wsUrl);
+            showDebug('正在连接: ' + wsUrl);
+
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (e) {
+                showDebug('创建 WebSocket 失败: ' + e.message);
+                return;
+            }
 
             ws.onopen = () => {
+                showDebug('WebSocket 已连接');
                 updateStatus('connected', '已连接');
                 // 请求客户端列表
                 sendMessage({ type: 'list' });
             };
 
             ws.onmessage = (event) => {
+                showDebug('收到消息: ' + event.data.substring(0, 100));
                 const msg = JSON.parse(event.data);
                 handleMessage(msg);
             };
 
-            ws.onclose = () => {
+            ws.onclose = (event) => {
+                showDebug('连接关闭: code=' + event.code + ', reason=' + event.reason);
                 updateStatus('', '连接已断开');
                 document.getElementById('clientList').style.display = 'none';
             };
@@ -357,7 +373,17 @@
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
                 updateStatus('', '连接错误');
+                showDebug('WebSocket 错误: ' + wsUrl);
             };
+        }
+
+        // 显示调试信息
+        function showDebug(msg) {
+            const debugEl = document.getElementById('debugLog');
+            if (debugEl) {
+                const time = new Date().toLocaleTimeString();
+                debugEl.innerHTML = `<div>[${time}] ${msg}</div>` + debugEl.innerHTML;
+            }
         }
 
         // 处理消息
