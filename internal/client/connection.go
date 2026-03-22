@@ -200,6 +200,16 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if err := c.tmux.Attach(); err != nil {
 			log.Printf("Failed to attach to tmux: %v", err)
 		}
+
+		// 捕获当前屏幕内容并发送给用户（解决刷新后黑屏问题）
+		if output, err := c.tmux.CaptureOutput(); err == nil && output != "" {
+			outputMsg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
+				Data: output,
+			})
+			outputMsg.To = msg.From
+			c.send <- outputMsg
+		}
+
 		// 启动转发
 		go c.startForwarding(msg.From)
 
