@@ -54,7 +54,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Host: "0.0.0.0",
-			Port: 8765,
+			Port: 6022,
 			TLS: TLSConfig{
 				Enabled: true,
 			},

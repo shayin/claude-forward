@@ -1,5 +1,5 @@
 server:
-  url: "wss://your-server-ip:8765"
+  url: "wss://your-server-ip:6022"
   token: "your-secret-token-here"
   reconnect_interval: 5
 
