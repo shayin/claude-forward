@@ -52,7 +52,13 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		ID:   uuid.New().String(),
 		Conn: conn,
 		Send: make(chan *protocol.Message, 256),
+		Type: ConnTypeUser, // 默认为用户连接
 	}
+
+	// 注册用户连接到 Hub
+	h.hub.mu.Lock()
+	h.hub.users[connection.ID] = connection
+	h.hub.mu.Unlock()
 
 	// 启动写协程
 	go h.writePump(connection)
