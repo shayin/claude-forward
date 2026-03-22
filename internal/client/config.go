@@ -38,7 +38,7 @@ type TmuxConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			URL:               "wss://localhost:8765",
+			URL:               "wss://localhost:6022",
 			ReconnectInterval: 5,
 		},
 		Client: ClientConfig{

@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=nobody
-Group=nogroup
+User=claude-forward
+Group=claude-forward
 WorkingDirectory=/opt/claude-forward
 ExecStart=/opt/claude-forward/server /opt/claude-forward/server.yaml
 Restart=always
@@ -14,6 +14,8 @@ RestartSec=5
 # Security
 NoNewPrivileges=true
 ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/claude-forward
 
 [Install]
 WantedBy=multi-user.target

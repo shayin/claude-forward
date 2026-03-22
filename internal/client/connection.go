@@ -41,7 +41,7 @@ func (c *Client) Connect() error {
 	// 构建 WebSocket URL
 	url := c.config.Server.URL
 	if url == "" {
-		url = "wss://localhost:8765"
+		url = "wss://localhost:6022"
 	}
 
 	// 添加 token
