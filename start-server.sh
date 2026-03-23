@@ -68,7 +68,7 @@ stop_process() {
 # 拉取最新代码
 pull() {
     print_info "正在拉取最新代码..."
-    git pull origin main
+    git pull origin main --no-rebase
     print_step "代码已更新"
 }
 
@@ -168,7 +168,7 @@ auto_upgrade() {
     echo "  远程: ${remote_commit:0:7}"
 
     stop_process
-    git pull origin main --quiet
+    git pull origin main --no-rebase --quiet
     build
     start
 
