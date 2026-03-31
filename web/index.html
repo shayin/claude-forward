@@ -346,7 +346,8 @@
             updateStatus('connecting', '连接中...');
 
             const wsUrl = `${serverUrl}/ws?token=${token}`;
-            showDebug('正在连接: ' + wsUrl);
+            const maskedWsUrl = `${serverUrl}/ws?token=${'*'.repeat(token.length)}`;
+            showDebug('正在连接: ' + maskedWsUrl);
 
             try {
                 ws = new WebSocket(wsUrl);
