@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -293,7 +294,18 @@ func (c *Client) startForwarding(userID string) {
 
 		n, err := c.tmux.Read(buf)
 		if err != nil {
-			log.Printf("Read from tmux error: %v", err)
+			if err == io.EOF {
+				// EOF 表示 tmux session 已结束（可能是用户退出或 session 被关闭）
+				// 发送最后一个输出消息通知前端
+				msg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
+					Data: "\r\n[tmux session ended]\r\n",
+				})
+				msg.To = userID
+				c.send <- msg
+				log.Printf("Tmux session ended, stopping forwarding")
+			} else {
+				log.Printf("Read from tmux error: %v", err)
+			}
 			break
 		}
 
