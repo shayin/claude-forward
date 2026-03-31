@@ -387,6 +387,13 @@
                 showDebug('连接关闭: code=' + event.code + ', reason=' + event.reason);
                 updateStatus('', '连接已断开');
 
+                // 断开时清理终端 DOM，避免重连后残留显示
+                if (term) {
+                    term.clear();
+                    document.getElementById('terminal').innerHTML = '';
+                }
+                pendingOutput = [];
+
                 // 如果之前有 attach 的客户端，保存到 localStorage 以便重连后恢复
                 if (attachedClient) {
                     localStorage.setItem('cf_attached_client', attachedClient);
@@ -508,6 +515,10 @@
             document.getElementById('configForm').style.display = 'none';
             document.getElementById('clientList').style.display = 'none';
 
+            // 清空终端容器 DOM，确保没有残留
+            const terminalEl = document.getElementById('terminal');
+            terminalEl.innerHTML = '';
+
             // 初始化终端（每次重新创建以确保干净状态）
             if (term) {
                 // 销毁旧终端
@@ -515,6 +526,9 @@
                 term = null;
                 fitAddon = null;
             }
+
+            // 清空待处理的输出（避免旧数据干扰新终端）
+            pendingOutput = [];
 
             term = new Terminal({
                 theme: {
@@ -605,6 +619,8 @@
             document.getElementById('clientList').style.display = 'block';
             if (term) {
                 term.clear();
+                // 清空终端 DOM，避免残留
+                document.getElementById('terminal').innerHTML = '';
             }
             // 清空待处理的输出
             pendingOutput = [];
