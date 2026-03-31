@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/shayin/claude-forward/internal/client"
@@ -15,15 +14,6 @@ func main() {
 	// 解析命令行参数
 	configPath := flag.String("config", "configs/client.yaml", "配置文件路径")
 	flag.Parse()
-
-	// 如果配置路径是相对路径，转换为相对于可执行文件的绝对路径
-	if !filepath.IsAbs(*configPath) {
-		execPath, err := os.Executable()
-		if err == nil {
-			execDir := filepath.Dir(execPath)
-			*configPath = filepath.Join(execDir, "..", *configPath)
-		}
-	}
 
 	// 加载配置
 	config, err := client.LoadConfig(*configPath)

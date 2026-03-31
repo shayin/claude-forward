@@ -17,9 +17,9 @@ NC='\033[0m'
 # 配置
 PID_FILE="/tmp/claude-forward-client.pid"
 LOG_FILE="/tmp/claude-forward-client.log"
-CONFIG_TPL="configs/client.yaml.tpl"
-CONFIG_FILE="configs/client.yaml"
-BINARY="bin/client"
+CONFIG_TPL="$SCRIPT_DIR/configs/client.yaml.tpl"
+CONFIG_FILE="$SCRIPT_DIR/configs/client.yaml"
+BINARY="$SCRIPT_DIR/bin/client"
 
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
