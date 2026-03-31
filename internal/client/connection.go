@@ -276,6 +276,14 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 
 	case protocol.TypePong:
 		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+	case protocol.TypeKillSession:
+		log.Printf("Killing tmux session by user request")
+		c.stopForwarding()
+		c.tmux.Close()
+		if err := c.tmux.KillSession(); err != nil {
+			log.Printf("Failed to kill tmux session: %v", err)
+		}
 	}
 }
 

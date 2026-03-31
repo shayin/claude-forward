@@ -21,6 +21,9 @@ const (
 	TypeOutput MessageType = "output" // 终端输出
 	TypeResize MessageType = "resize" // 终端尺寸变化
 
+	// 会话管理
+	TypeKillSession MessageType = "kill_session" // 销毁 tmux 会话
+
 	// 状态管理
 	TypeList   MessageType = "list"   // 列出客户端
 	TypeStatus MessageType = "status" // 客户端状态更新

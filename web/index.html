@@ -288,7 +288,8 @@
             <!-- 隐藏的 input 用于触发移动端软键盘 -->
             <input type="text" id="mobileInput" style="position: absolute; left: -9999px; opacity: 0;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             <div class="toolbar">
-                <button class="btn btn-danger" onclick="detach()">断开连接</button>
+                <button class="btn btn-primary" onclick="detach()">断开连接</button>
+                <button class="btn btn-danger" onclick="killSession()">销毁会话</button>
             </div>
         </div>
     </div>
@@ -505,6 +506,18 @@
             attachedClient = null;
             isReconnecting = false;
             // 清除保存的 attach 状态
+            localStorage.removeItem('cf_attached_client');
+            hideTerminal();
+        }
+
+        // 销毁会话
+        function killSession() {
+            if (!confirm('确定要销毁终端会话吗？会话中的所有进程将被终止。')) {
+                return;
+            }
+            sendMessage({ type: 'kill_session' });
+            attachedClient = null;
+            isReconnecting = false;
             localStorage.removeItem('cf_attached_client');
             hideTerminal();
         }

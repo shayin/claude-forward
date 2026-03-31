@@ -154,6 +154,9 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 	case protocol.TypeResize:
 		h.handleResize(conn, msg)
 
+	case protocol.TypeKillSession:
+		h.handleKillSession(conn)
+
 	case protocol.TypeOutput:
 		h.handleOutput(conn, msg)
 
@@ -320,5 +323,29 @@ func (h *Handler) handleOutput(conn *Connection, msg *protocol.Message) {
 
 	if targetUser != nil {
 		targetUser.Send <- msg
+	}
+}
+
+// handleKillSession 处理销毁会话请求
+func (h *Handler) handleKillSession(conn *Connection) {
+	client, ok := h.hub.GetAttachedClient(conn.ID)
+	if !ok {
+		return
+	}
+
+	// 转发给客户端执行销毁
+	client.Send <- &protocol.Message{
+		Type: protocol.TypeKillSession,
+		From: conn.ID,
+	}
+
+	// 断开用户连接
+	h.hub.DetachUser(conn.ID)
+	conn.Send <- &protocol.Message{
+		Type: protocol.TypeDetached,
+		Payload: mustMarshal(protocol.StatusPayload{
+			Online:  false,
+			Message: "session killed",
+		}),
 	}
 }
