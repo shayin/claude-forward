@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -22,6 +23,7 @@ type Client struct {
 	cancel        context.CancelFunc
 	forwardCancel context.CancelFunc // 用于停止 forwarding goroutine
 	forwardMu     sync.Mutex
+	connClosed    int32 // 连接是否已关闭的标志（用于防止重复关闭）
 }
 
 // NewClient 创建客户端
@@ -39,6 +41,9 @@ func NewClient(config *Config) *Client {
 func (c *Client) Connect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// 重置连接关闭标志（用于重连场景）
+	atomic.StoreInt32(&c.connClosed, 0)
 
 	// 构建 WebSocket URL
 	url := c.config.Server.URL
@@ -76,6 +81,11 @@ func (c *Client) Connect() error {
 
 // Disconnect 断开连接
 func (c *Client) Disconnect() {
+	// 使用原子操作确保只关闭一次
+	if !atomic.CompareAndSwapInt32(&c.connClosed, 0, 1) {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -154,14 +164,29 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		// 只在连接未关闭时关闭（通过 Disconnect 的原子操作保证）
+		c.mu.Lock()
+		if c.conn != nil && atomic.LoadInt32(&c.connClosed) == 0 {
+			c.conn.Close()
+		}
+		c.mu.Unlock()
 	}()
 
 	for {
 		select {
+		case <-c.ctx.Done():
+			return
+
 		case msg, ok := <-c.send:
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			c.mu.Lock()
+			conn := c.conn
+			c.mu.Unlock()
+
+			if conn == nil || atomic.LoadInt32(&c.connClosed) == 1 {
 				return
 			}
 
@@ -171,12 +196,20 @@ func (c *Client) writePump() {
 				continue
 			}
 
-			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
 			}
 
 		case <-ticker.C:
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			c.mu.Lock()
+			conn := c.conn
+			c.mu.Unlock()
+
+			if conn == nil || atomic.LoadInt32(&c.connClosed) == 1 {
+				return
+			}
+
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
