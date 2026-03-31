@@ -14,16 +14,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# 获取脚本所在目录（必须最先定义）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 # 配置
 PID_FILE="/tmp/claude-forward-client.pid"
 LOG_FILE="/tmp/claude-forward-client.log"
 CONFIG_TPL="$SCRIPT_DIR/configs/client.yaml.tpl"
 CONFIG_FILE="$SCRIPT_DIR/configs/client.yaml"
 BINARY="$SCRIPT_DIR/bin/client"
-
-# 获取脚本所在目录
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
 
 print_info() { echo -e "${BLUE}[i]${NC} $1"; }
 print_step() { echo -e "${GREEN}[✓]${NC} $1"; }
