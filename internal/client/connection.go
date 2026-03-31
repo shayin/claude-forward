@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -230,6 +229,11 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		// 停止之前的 forwarding goroutine
 		c.stopForwarding()
 
+		// 确保 tmux 会话存在
+		if err := c.tmux.EnsureSession(); err != nil {
+			log.Printf("Failed to ensure tmux session: %v", err)
+		}
+
 		// 连接到 tmux 会话
 		if err := c.tmux.Attach(); err != nil {
 			log.Printf("Failed to attach to tmux: %v", err)
@@ -294,18 +298,7 @@ func (c *Client) startForwarding(userID string) {
 
 		n, err := c.tmux.Read(buf)
 		if err != nil {
-			if err == io.EOF {
-				// EOF 表示 tmux session 已结束（可能是用户退出或 session 被关闭）
-				// 发送最后一个输出消息通知前端
-				msg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
-					Data: "\r\n[tmux session ended]\r\n",
-				})
-				msg.To = userID
-				c.send <- msg
-				log.Printf("Tmux session ended, stopping forwarding")
-			} else {
-				log.Printf("Read from tmux error: %v", err)
-			}
+			log.Printf("Read from tmux error: %v", err)
 			break
 		}
 

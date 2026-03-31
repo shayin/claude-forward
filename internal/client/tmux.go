@@ -58,16 +58,27 @@ func (t *TmuxManager) CreateSession() error {
 
 	if t.useTmux {
 		cmd := exec.Command("tmux", "new-session", "-d", "-s", t.config.SessionName, shell)
-		return cmd.Run()
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("tmux new-session failed: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+		return nil
 	}
 	return nil
 }
 
-// EnsureSession 确保会话存在
+// EnsureSession 确保会话存在，失败时重试
 func (t *TmuxManager) EnsureSession() error {
 	if t.SessionExists() {
 		return nil
 	}
+	// 第一次尝试创建
+	if err := t.CreateSession(); err == nil {
+		return nil
+	}
+	// 失败后清理残留状态再重试
+	_ = exec.Command("tmux", "kill-server").Run()
+	time.Sleep(500 * time.Millisecond)
 	return t.CreateSession()
 }
 
@@ -115,15 +126,6 @@ func (t *TmuxManager) Attach() error {
 	}
 
 	if t.useTmux {
-		// 检查 session 是否存在
-		checkCmd := exec.Command("tmux", "has-session", "-t", t.config.SessionName)
-		if err := checkCmd.Run(); err != nil {
-			// session 不存在，尝试创建
-			createCmd := exec.Command("tmux", "new-session", "-d", "-s", t.config.SessionName, shell)
-			if err := createCmd.Run(); err != nil {
-				return fmt.Errorf("tmux session does not exist and failed to create: %w", err)
-			}
-		}
 		// 使用 tmux attach 连接到会话
 		t.cmd = exec.Command("tmux", "attach", "-t", t.config.SessionName)
 	} else {
@@ -186,10 +188,6 @@ func (t *TmuxManager) Read(buf []byte) (int, error) {
 	if err != nil {
 		if os.IsTimeout(err) {
 			return 0, nil // 超时返回 0，不报错
-		}
-		if err == io.EOF {
-			// PTY 已关闭，返回 io.EOF 而不是 "read |0: bad file descriptor"
-			return 0, io.EOF
 		}
 		return n, err
 	}
