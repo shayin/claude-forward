@@ -111,11 +111,8 @@ func (c *Client) Run() {
 
 	// 重连循环
 	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		default:
-		}
+		// 每次连接创建新的 context（旧的 cancel 后不会复用）
+		c.ctx, c.cancel = context.WithCancel(context.Background())
 
 		if err := c.Connect(); err != nil {
 			log.Printf("Connection failed: %v", err)
@@ -127,7 +124,7 @@ func (c *Client) Run() {
 		<-c.ctx.Done()
 		c.Disconnect()
 
-		// 等待重连
+		log.Printf("Disconnected, reconnecting in %ds...", c.config.Server.ReconnectInterval)
 		time.Sleep(time.Duration(c.config.Server.ReconnectInterval) * time.Second)
 	}
 }
