@@ -18,12 +18,14 @@ const (
 
 // Connection 表示一个 WebSocket 连接
 type Connection struct {
-	ID       string
-	Type     ConnType
-	Conn     *websocket.Conn
-	ClientID string // 如果是用户连接，记录其附加的客户端ID
-	Send     chan *protocol.Message
-	mu       sync.Mutex
+	ID          string
+	Type        ConnType
+	Conn        *websocket.Conn
+	ClientID    string // 如果是用户连接，记录其附加的客户端ID
+	ClientName  string // 客户端名称（注册时设置）
+	Description string // 客户端描述（注册时设置）
+	Send        chan *protocol.Message
+	mu          sync.Mutex
 }
 
 // Hub 管理所有连接
@@ -116,8 +118,10 @@ func (h *Hub) ListClients() []protocol.ClientInfo {
 	var clients []protocol.ClientInfo
 	for _, conn := range h.clients {
 		clients = append(clients, protocol.ClientInfo{
-			ID:     conn.ID,
-			Online: true,
+			ID:          conn.ID,
+			Name:        conn.ClientName,
+			Description: conn.Description,
+			Online:      true,
 		})
 	}
 	return clients

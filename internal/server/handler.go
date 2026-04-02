@@ -184,6 +184,8 @@ func (h *Handler) handleRegister(conn *Connection, msg *protocol.Message) {
 	conn.ID = payload.ID
 	conn.Type = ConnTypeClient
 	conn.ClientID = payload.ID
+	conn.ClientName = payload.Name
+	conn.Description = payload.Description
 
 	// 注册到 Hub
 	h.hub.RegisterClient(conn)

@@ -1,7 +1,11 @@
 package client
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -34,19 +38,15 @@ type TmuxConfig struct {
 	Shell       string `yaml:"shell"` // 默认 shell
 }
 
-// DefaultConfig 返回默认配置
+// DefaultConfig 返回默认配置（ID/Name/SessionName 留空，由 ApplyDefaults 动态推导）
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
 			URL:               "wss://localhost:6022",
 			ReconnectInterval: 5,
 		},
-		Client: ClientConfig{
-			Name: "Claude Forward Client",
-		},
 		Tmux: TmuxConfig{
-			SessionName: "claude-forward",
-			AutoStart:   true,
+			AutoStart: true,
 		},
 	}
 }
@@ -63,10 +63,54 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	// 对空值应用默认值（YAML 空字符串会覆盖 Go 结构体的默认值）
-	if config.Tmux.SessionName == "" {
-		config.Tmux.SessionName = "claude-forward"
-	}
-
+	ApplyDefaults(config)
 	return config, nil
+}
+
+// ApplyDefaults 对配置中空值字段用工作目录推导填充
+func ApplyDefaults(config *Config) {
+	sessionName, basename := DeriveFromPath(".")
+
+	if config.Tmux.SessionName == "" {
+		config.Tmux.SessionName = sessionName
+	}
+	if config.Client.ID == "" {
+		config.Client.ID = GenerateClientID(basename)
+	}
+	if config.Client.Name == "" {
+		config.Client.Name = basename
+	}
+}
+
+// sanitizeTmuxName 清洗 tmux 会话名：`.` 和 `:` 替换为 `-`，折叠重复 `-`，截断 50 字符
+func sanitizeTmuxName(name string) string {
+	name = strings.ReplaceAll(name, ".", "-")
+	name = strings.ReplaceAll(name, ":", "-")
+	re := regexp.MustCompile(`-{2,}`)
+	name = re.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+	if len(name) > 50 {
+		name = name[:50]
+	}
+	return name
+}
+
+// DeriveFromPath 从项目路径推导命名，返回 (tmuxSessionName, basename)
+func DeriveFromPath(projectPath string) (string, string) {
+	absPath, err := filepath.Abs(projectPath)
+	if err != nil {
+		absPath = projectPath
+	}
+	basename := filepath.Base(absPath)
+	sessionName := fmt.Sprintf("cf-%s", sanitizeTmuxName(basename))
+	return sessionName, basename
+}
+
+// GenerateClientID 生成客户端 ID：hostname-basename
+func GenerateClientID(basename string) string {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+	return fmt.Sprintf("%s-%s", hostname, basename)
 }

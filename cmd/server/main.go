@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -9,11 +10,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,9 +59,9 @@ func main() {
 		w.Write(mustMarshal(clients))
 	})
 
-	// 静态文件服务
+	// 静态文件服务（带 gzip 压缩）
 	fs := http.FileServer(http.Dir("web"))
-	http.Handle("/", fs)
+	http.Handle("/", gzipMiddleware(fs))
 
 	// 创建 HTTP 服务器
 	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)
@@ -149,4 +152,44 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 func mustMarshal(v any) []byte {
 	data, _ := json.Marshal(v)
 	return data
+}
+
+// gzipMiddleware 对文本类静态资源做 gzip 压缩
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 检查客户端是否支持 gzip
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 只压缩文本类资源
+		ext := ""
+		if idx := strings.LastIndex(r.URL.Path, "."); idx >= 0 {
+			ext = r.URL.Path[idx:]
+		}
+		switch ext {
+		case ".js", ".css", ".html", ".json", ".svg", ".md":
+			// 继续压缩
+		default:
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		next.ServeHTTP(gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+	})
+}
+
+// gzipResponseWriter 包装 ResponseWriter 以写入 gzip
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	io.Writer
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
 }
