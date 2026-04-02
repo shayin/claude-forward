@@ -180,6 +180,14 @@ func (h *Handler) handleRegister(conn *Connection, msg *protocol.Message) {
 		return
 	}
 
+	// 清理初始注册时写入 users map 的旧条目（conn.ID 原值是 UUID）
+	oldID := conn.ID
+	if oldID != payload.ID {
+		h.hub.mu.Lock()
+		delete(h.hub.users, oldID)
+		h.hub.mu.Unlock()
+	}
+
 	// 更新连接信息
 	conn.ID = payload.ID
 	conn.Type = ConnTypeClient
