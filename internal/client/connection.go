@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,6 +69,8 @@ func (c *Client) Connect() error {
 		ID:          c.config.Client.ID,
 		Name:        c.config.Client.Name,
 		Description: c.config.Client.Description,
+		PID:         os.Getpid(),
+		Path:        c.config.Path,
 	})
 	c.send <- registerMsg
 

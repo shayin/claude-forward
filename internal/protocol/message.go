@@ -49,6 +49,8 @@ type RegisterPayload struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	PID         int    `json:"pid"`
+	Path        string `json:"path"`
 }
 
 // AttachPayload 连接请求载荷
@@ -84,6 +86,8 @@ type ClientInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	PID         int    `json:"pid"`
+	Path        string `json:"path"`
 	Online      bool   `json:"online"`
 	ConnectedAt int64  `json:"connected_at,omitempty"`
 }

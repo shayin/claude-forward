@@ -24,6 +24,8 @@ type Connection struct {
 	ClientID    string // 如果是用户连接，记录其附加的客户端ID
 	ClientName  string // 客户端名称（注册时设置）
 	Description string // 客户端描述（注册时设置）
+	PID         int    // 客户端进程 ID
+	Path        string // 客户端工作目录
 	Send        chan *protocol.Message
 	mu          sync.Mutex
 }
@@ -121,6 +123,8 @@ func (h *Hub) ListClients() []protocol.ClientInfo {
 			ID:          conn.ID,
 			Name:        conn.ClientName,
 			Description: conn.Description,
+			PID:         conn.PID,
+			Path:        conn.Path,
 			Online:      true,
 		})
 	}

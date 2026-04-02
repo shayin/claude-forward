@@ -100,12 +100,25 @@
 
         .client-name {
             font-weight: bold;
-            margin-bottom: 5px;
         }
 
-        .client-id {
+        .client-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 4px;
             font-size: 12px;
             color: #666;
+        }
+
+        .client-path {
+            font-size: 12px;
+            color: #555;
+            margin-top: 2px;
+            font-family: Monaco, Menlo, monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .terminal-container {
@@ -486,7 +499,10 @@
             container.innerHTML = clients.map(client => `
                 <div class="client-item ${attachedClient === client.id ? 'active' : ''}" onclick="attach('${client.id}')">
                     <div class="client-name">${client.name || client.id}</div>
-                    <div class="client-id">ID: ${client.id}</div>
+                    <div class="client-meta">
+                        <span>PID: ${client.pid || '-'}</span>
+                    </div>
+                    <div class="client-path">${client.path || ''}</div>
                 </div>
             `).join('');
         }

@@ -15,6 +15,7 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	Client ClientConfig `yaml:"client"`
 	Tmux   TmuxConfig   `yaml:"tmux"`
+	Path   string       // 工作目录（运行时推导，不来自配置文件）
 }
 
 // ServerConfig 服务器连接配置
@@ -69,7 +70,7 @@ func LoadConfig(path string) (*Config, error) {
 
 // ApplyDefaults 对配置中空值字段用工作目录推导填充
 func ApplyDefaults(config *Config) {
-	sessionName, basename := DeriveFromPath(".")
+	sessionName, basename, absPath := DeriveFromPath(".")
 
 	if config.Tmux.SessionName == "" {
 		config.Tmux.SessionName = sessionName
@@ -79,6 +80,9 @@ func ApplyDefaults(config *Config) {
 	}
 	if config.Client.Name == "" {
 		config.Client.Name = basename
+	}
+	if config.Path == "" {
+		config.Path = absPath
 	}
 }
 
@@ -95,15 +99,15 @@ func sanitizeTmuxName(name string) string {
 	return name
 }
 
-// DeriveFromPath 从项目路径推导命名，返回 (tmuxSessionName, basename)
-func DeriveFromPath(projectPath string) (string, string) {
+// DeriveFromPath 从项目路径推导命名，返回 (tmuxSessionName, basename, absPath)
+func DeriveFromPath(projectPath string) (string, string, string) {
 	absPath, err := filepath.Abs(projectPath)
 	if err != nil {
 		absPath = projectPath
 	}
 	basename := filepath.Base(absPath)
 	sessionName := fmt.Sprintf("cf-%s", sanitizeTmuxName(basename))
-	return sessionName, basename
+	return sessionName, basename, absPath
 }
 
 // GenerateClientID 生成客户端 ID：hostname-basename
