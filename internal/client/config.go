@@ -63,5 +63,10 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// 对空值应用默认值（YAML 空字符串会覆盖 Go 结构体的默认值）
+	if config.Tmux.SessionName == "" {
+		config.Tmux.SessionName = "claude-forward"
+	}
+
 	return config, nil
 }
