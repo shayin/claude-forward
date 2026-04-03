@@ -126,16 +126,24 @@
             border-radius: 8px;
             overflow: hidden;
             display: none;
+            flex-direction: column;
         }
 
         .terminal-container.active {
-            display: block;
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 0;
+            z-index: 100;
         }
 
         #terminal {
             padding: 10px;
-            height: calc(100vh - 300px);
-            min-height: 400px;
+            flex: 1;
+            min-height: 0;
         }
 
         .toolbar {
@@ -144,6 +152,7 @@
             padding: 10px;
             background: #16213e;
             border-top: 1px solid #333;
+            flex-shrink: 0;
         }
 
         .btn {
@@ -249,10 +258,6 @@
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
-            }
-
-            #terminal {
-                height: calc(100vh - 350px);
             }
         }
     </style>
@@ -543,6 +548,7 @@
             document.getElementById('terminalContainer').classList.add('active');
             document.getElementById('configForm').style.display = 'none';
             document.getElementById('clientList').style.display = 'none';
+            document.querySelector('.header').style.display = 'none';
 
             // 清空终端容器 DOM，确保没有残留
             const terminalEl = document.getElementById('terminal');
@@ -648,6 +654,7 @@
             document.getElementById('terminalContainer').classList.remove('active');
             document.getElementById('configForm').style.display = 'block';
             document.getElementById('clientList').style.display = 'block';
+            document.querySelector('.header').style.display = '';
             if (term) {
                 term.clear();
                 // 清空终端 DOM，避免残留
