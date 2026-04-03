@@ -574,23 +574,10 @@
             fitAddon = new FitAddon.FitAddon();
             term.loadAddon(fitAddon);
 
-            // 输入处理
-            term.onData((data) => {
-                sendMessage({
-                    type: 'input',
-                    payload: { data: data }
-                });
-            });
+            // 输入处理：桌面端用 term.onData，移动端用 hidden input
+            const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-            // 移动端软键盘支持
-            const mobileInput = document.getElementById('mobileInput');
-
-            // 点击终端时聚焦 input
-            term.element.addEventListener('click', () => {
-                mobileInput.focus();
-            });
-
-            // 特殊键映射
+            // 特殊键映射（移动端用）
             const specialKeys = {
                 'Enter': '\r',
                 'Backspace': '\x7f',
@@ -605,27 +592,42 @@
                 'End': '\x1b[F'
             };
 
-            // 监听 keydown - 只处理特殊键
-            mobileInput.addEventListener('keydown', (e) => {
-                if (specialKeys[e.key]) {
-                    e.preventDefault();
-                    sendMessage({
-                        type: 'input',
-                        payload: { data: specialKeys[e.key] }
-                    });
-                }
-            });
+            if (isMobile) {
+                // 移动端：通过 hidden input 接收虚拟键盘输入
+                const mobileInput = document.getElementById('mobileInput');
 
-            // 监听 input 事件处理普通字符输入
-            mobileInput.addEventListener('input', (e) => {
-                if (e.data) {
+                term.element.addEventListener('click', () => {
+                    mobileInput.focus();
+                });
+
+                mobileInput.addEventListener('keydown', (e) => {
+                    if (specialKeys[e.key]) {
+                        e.preventDefault();
+                        sendMessage({
+                            type: 'input',
+                            payload: { data: specialKeys[e.key] }
+                        });
+                    }
+                });
+
+                mobileInput.addEventListener('input', (e) => {
+                    if (e.data) {
+                        sendMessage({
+                            type: 'input',
+                            payload: { data: e.data }
+                        });
+                    }
+                    mobileInput.value = '';
+                });
+            } else {
+                // 桌面端：直接用 xterm 的内置输入
+                term.onData((data) => {
                     sendMessage({
                         type: 'input',
-                        payload: { data: e.data }
+                        payload: { data: data }
                     });
-                }
-                mobileInput.value = '';
-            });
+                });
+            }
 
             // 窗口大小变化
             window.addEventListener('resize', () => {
