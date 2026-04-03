@@ -160,6 +160,14 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 	case protocol.TypeOutput:
 		h.handleOutput(conn, msg)
 
+	case protocol.TypeChatInput, protocol.TypeNewSession:
+		// 聊天输入/新会话：从 user 转发到 client
+		h.handleChatUserToClient(conn, msg)
+
+	case protocol.TypeChatMessage, protocol.TypeChatReady, protocol.TypeChatError, protocol.TypeSessionInfo:
+		// 聊天消息：从 client 转发到 user
+		h.handleChatClientToUser(conn, msg)
+
 	case protocol.TypePong:
 		// 心跳响应，重置读超时
 		conn.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -359,5 +367,34 @@ func (h *Handler) handleKillSession(conn *Connection) {
 			Online:  false,
 			Message: "session killed",
 		}),
+	}
+}
+
+// handleChatUserToClient 转发聊天消息从用户到客户端
+func (h *Handler) handleChatUserToClient(conn *Connection, msg *protocol.Message) {
+	client, ok := h.hub.GetAttachedClient(conn.ID)
+	if !ok {
+		return
+	}
+	msg.From = conn.ID
+	client.Send <- msg
+}
+
+// handleChatClientToUser 转发聊天消息从客户端到用户
+func (h *Handler) handleChatClientToUser(conn *Connection, msg *protocol.Message) {
+	h.hub.mu.RLock()
+	var targetUser *Connection
+	for userID, clientID := range h.hub.attachMap {
+		if clientID == conn.ID {
+			if user, ok := h.hub.users[userID]; ok {
+				targetUser = user
+				break
+			}
+		}
+	}
+	h.hub.mu.RUnlock()
+
+	if targetUser != nil {
+		targetUser.Send <- msg
 	}
 }

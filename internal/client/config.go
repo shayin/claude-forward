@@ -15,6 +15,7 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	Client ClientConfig `yaml:"client"`
 	Tmux   TmuxConfig   `yaml:"tmux"`
+	Claude ClaudeConfig `yaml:"claude"`
 	Path   string       // 工作目录（运行时推导，不来自配置文件）
 }
 

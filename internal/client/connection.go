@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -19,6 +20,7 @@ type Client struct {
 	conn          *websocket.Conn
 	send          chan *protocol.Message
 	tmux          *TmuxManager
+	claude        *ClaudeManager
 	mu            sync.Mutex
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -102,6 +104,9 @@ func (c *Client) Disconnect() {
 func (c *Client) Run() {
 	// 初始化 tmux 管理器
 	c.tmux = NewTmuxManager(c.config.Tmux)
+
+	// 初始化 Claude 管理器
+	c.claude = NewClaudeManager(c.config.Claude)
 
 	if c.config.Tmux.AutoStart {
 		if err := c.tmux.EnsureSession(); err != nil {
@@ -284,6 +289,26 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if err := c.tmux.KillSession(); err != nil {
 			log.Printf("Failed to kill tmux session: %v", err)
 		}
+
+	case protocol.TypeChatInput:
+		var payload protocol.ChatInputPayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			return
+		}
+		go c.handleChatInput(msg.From, payload.Text)
+
+	case protocol.TypeNewSession:
+		log.Printf("Starting new Claude session")
+		c.claude.Abort()
+		c.claude.ResetSession()
+
+	case protocol.TypeSessionInfo:
+		infoMsg, _ := protocol.NewMessage(protocol.TypeSessionInfo, protocol.SessionInfoPayload{
+			SessionID: c.claude.SessionID(),
+			Path:      c.config.Path,
+		})
+		infoMsg.To = msg.From
+		c.send <- infoMsg
 	}
 }
 
@@ -328,5 +353,54 @@ func (c *Client) stopForwarding() {
 	if c.forwardCancel != nil {
 		c.forwardCancel()
 		c.forwardCancel = nil
+	}
+}
+
+// handleChatInput 处理聊天输入，启动 Claude 并流式转发结果
+func (c *Client) handleChatInput(userID string, text string) {
+	if c.claude.IsRunning() {
+		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
+			Code:    409,
+			Message: "Claude is still processing, please wait",
+		})
+		errMsg.To = userID
+		c.send <- errMsg
+		return
+	}
+
+	if err := c.claude.SendMessage(text); err != nil {
+		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
+			Code:    500,
+			Message: fmt.Sprintf("Failed to start Claude: %v", err),
+		})
+		errMsg.To = userID
+		c.send <- errMsg
+		return
+	}
+
+	// 流式转发事件到用户
+	for event := range c.claude.Stream() {
+		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
+			EventType:  string(event.Type),
+			Text:       event.Text,
+			ToolID:     event.ToolID,
+			ToolName:   event.ToolName,
+			ToolInput:  event.ToolInput,
+			ToolOutput: event.ToolOutput,
+			CostUSD:    event.CostUSD,
+			IsPartial:  event.IsPartial,
+			SessionID:  event.SessionID,
+		})
+		msg.To = userID
+		c.send <- msg
+
+		// result 事件表示轮次结束
+		if event.Type == EventResult {
+			readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+				SessionID: c.claude.SessionID(),
+			})
+			readyMsg.To = userID
+			c.send <- readyMsg
+		}
 	}
 }

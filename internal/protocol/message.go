@@ -16,13 +16,21 @@ const (
 	TypeAttached MessageType = "attached" // 连接成功通知
 	TypeDetached MessageType = "detached" // 断开通知
 
-	// 终端 I/O
+	// 终端 I/O（旧模式，保留兼容）
 	TypeInput  MessageType = "input"  // 终端输入
 	TypeOutput MessageType = "output" // 终端输出
 	TypeResize MessageType = "resize" // 终端尺寸变化
 
+	// 聊天模式
+	TypeChatInput   MessageType = "chat_input"   // 用户发送聊天消息
+	TypeChatMessage MessageType = "chat_message"  // Claude 结构化输出事件
+	TypeChatReady   MessageType = "chat_ready"    // Claude 处理完毕，可接受新输入
+	TypeChatError   MessageType = "chat_error"    // Claude 处理错误
+
 	// 会话管理
 	TypeKillSession MessageType = "kill_session" // 销毁 tmux 会话
+	TypeNewSession  MessageType = "new_session"  // 开始新 Claude 会话
+	TypeSessionInfo MessageType = "session_info"  // 会话元数据
 
 	// 状态管理
 	TypeList   MessageType = "list"   // 列出客户端
@@ -101,6 +109,30 @@ type ListPayload struct {
 type ErrorPayload struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// ChatInputPayload 聊天输入载荷
+type ChatInputPayload struct {
+	Text string `json:"text"`
+}
+
+// ChatMessagePayload 聊天消息载荷（Claude 输出事件）
+type ChatMessagePayload struct {
+	EventType  string          `json:"event_type"`            // "text", "thinking", "tool_start", "tool_end", "result", "stream_delta"
+	Text       string          `json:"text,omitempty"`        // 文本内容
+	ToolID     string          `json:"tool_id,omitempty"`     // 工具调用 ID
+	ToolName   string          `json:"tool_name,omitempty"`   // 工具名称
+	ToolInput  json.RawMessage `json:"tool_input,omitempty"`  // 工具输入参数
+	ToolOutput string          `json:"tool_output,omitempty"` // 工具输出
+	CostUSD    float64         `json:"cost_usd,omitempty"`    // 费用
+	IsPartial  bool            `json:"is_partial,omitempty"`  // 是否为流式片段
+	SessionID  string          `json:"session_id,omitempty"`  // Claude 会话 ID
+}
+
+// SessionInfoPayload 会话元数据
+type SessionInfoPayload struct {
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
 }
 
 // NewMessage 创建新消息
