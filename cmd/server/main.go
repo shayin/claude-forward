@@ -23,6 +23,9 @@ import (
 	"github.com/shayin/claude-forward/internal/server"
 )
 
+// buildInfo 通过 ldflags 注入
+var buildInfo string
+
 func main() {
 	// 加载配置
 	configPath := "configs/server.yaml"
@@ -57,6 +60,12 @@ func main() {
 
 		clients := hub.ListClients()
 		w.Write(mustMarshal(clients))
+	})
+
+	// 构建信息 API
+	http.HandleFunc("/api/build-info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(buildInfo))
 	})
 
 	// 静态文件服务（带 gzip 压缩）

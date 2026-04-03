@@ -929,7 +929,7 @@
             <div id="debugPanel">
                 <div id="debugLog"></div>
             </div>
-            <div class="build-info" id="buildInfo">__BUILD_INFO__</div>
+            <div class="build-info" id="buildInfo"></div>
         </div>
     </div>
 
@@ -1382,8 +1382,20 @@
             }
         }
 
+        // === Build Info ===
+        function loadBuildInfo() {
+            fetch('/api/build-info')
+                .then(r => r.ok ? r.text() : '')
+                .then(text => {
+                    const el = document.getElementById('buildInfo');
+                    if (el && text) el.textContent = text;
+                })
+                .catch(() => {});
+        }
+
         // === Start ===
         init();
+        loadBuildInfo();
     </script>
 </body>
 </html>
