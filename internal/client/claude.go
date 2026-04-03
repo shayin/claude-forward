@@ -117,7 +117,7 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 		args = append(args, "--allowedTools", cm.config.AllowedTools)
 	}
 	if cm.config.PermissionMode != "" {
-		args = append(args, "--permissionMode", cm.config.PermissionMode)
+		args = append(args, "--permission-mode", cm.config.PermissionMode)
 	}
 	if cm.config.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", cm.config.MaxTurns))
