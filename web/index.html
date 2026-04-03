@@ -9,28 +9,77 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --bg: #1a1a2e;
-            --surface: #16213e;
-            --border: #333;
-            --text: #eee;
-            --muted: #888;
-            --accent: #00d4ff;
-            --green: #00ff88;
-            --danger: #ff4757;
-            --user-bg: #0d47a1;
-            --assistant-bg: #263238;
-            --tool-bg: #1b2a1b;
-            --thinking-bg: #2a2a1b;
+            /* Surface */
+            --bg-page:          #F5F0E8;
+            --bg-surface:       #FAF9F5;
+            --bg-sunken:        #EDE8DD;
+
+            /* Text */
+            --text-primary:     #1F1E1D;
+            --text-secondary:   #57534E;
+            --text-tertiary:    #8C8680;
+            --text-placeholder: #B5AFA8;
+
+            /* Accent */
+            --accent-primary:   #C96442;
+            --accent-primary-hover: #B5573A;
+            --accent-secondary: #1C6BBB;
+            --accent-green:     #2D8F5A;
+            --accent-amber:     #B56613;
+
+            /* Border */
+            --border-default:   #E2DCD4;
+            --border-subtle:    #EBE7E0;
+            --border-strong:    #C9C3BA;
+
+            /* Semantic */
+            --user-bubble-bg:   #C96442;
+            --user-bubble-text: #FFFFFF;
+            --assistant-bubble-bg: #FFFFFF;
+            --assistant-bubble-text: #1F1E1D;
+            --thinking-bg:      #FFF8F0;
+            --thinking-border:  #F0E0CC;
+            --thinking-text:    #8C7B6B;
+            --tool-bg:          #F8F5EF;
+            --tool-border:      #E2DCD4;
+            --tool-header-bg:   #F0ECE4;
+            --tool-name-color:  #1C6BBB;
+            --tool-output-bg:   #2C2926;
+            --tool-output-text: #D4D0CA;
+            --status-connected: #2D8F5A;
+            --status-connecting:#B56613;
+            --status-error:     #C94444;
+
+            /* Shadow */
+            --shadow-sm:  0 1px 2px rgba(31,30,29,0.06);
+            --shadow-md:  0 2px 8px rgba(31,30,29,0.08), 0 1px 2px rgba(31,30,29,0.04);
+            --shadow-lg:  0 4px 16px rgba(31,30,29,0.10), 0 2px 4px rgba(31,30,29,0.06);
+
+            /* Radius */
+            --radius-sm:  8px;
+            --radius-md:  12px;
+            --radius-lg:  16px;
+            --radius-xl:  20px;
+            --radius-full: 9999px;
+
+            /* Transition */
+            --transition-fast:   150ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+            font-size: 15px;
+            line-height: 1.6;
+            background: var(--bg-page);
+            color: var(--text-primary);
             height: 100vh;
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overscroll-behavior: none;
         }
 
         /* === Header === */
@@ -39,8 +88,9 @@
             align-items: center;
             justify-content: space-between;
             padding: 12px 16px;
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
+            padding-top: max(12px, env(safe-area-inset-top));
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-subtle);
             flex-shrink: 0;
             z-index: 10;
         }
@@ -52,110 +102,356 @@
         }
 
         .header h1 {
-            font-size: 16px;
-            color: var(--accent);
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .header h1 .brand-accent {
+            color: var(--accent-primary);
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: var(--radius-full);
+            font-size: 12px;
+            font-weight: 500;
+            background: var(--bg-sunken);
+            color: var(--text-secondary);
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: #666;
+            background: var(--text-placeholder);
             flex-shrink: 0;
         }
 
-        .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
-        .status-dot.connecting { background: #ffaa00; animation: pulse 1s infinite; }
+        .status-dot.connected {
+            background: var(--status-connected);
+            box-shadow: 0 0 0 2px rgba(45,143,90,0.15);
+        }
 
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        .status-dot.connecting {
+            background: var(--status-connecting);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
 
-        .status-text { font-size: 12px; color: var(--muted); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
 
         .header-actions { display: flex; gap: 8px; }
 
-        .btn-icon {
+        .btn-ghost {
             background: none;
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 12px;
+            border: 1px solid var(--border-default);
+            color: var(--text-secondary);
+            padding: 6px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
             cursor: pointer;
+            transition: all var(--transition-fast);
+            -webkit-tap-highlight-color: transparent;
         }
 
-        .btn-icon:hover { border-color: var(--accent); }
-        .btn-icon.danger { border-color: var(--danger); color: var(--danger); }
+        .btn-ghost:hover {
+            background: var(--bg-sunken);
+            color: var(--text-primary);
+            border-color: var(--border-strong);
+        }
 
-        /* === Connection Form === */
-        .view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
-        .view.active { display: flex; }
+        .btn-ghost.danger:hover {
+            color: var(--status-error);
+            border-color: var(--status-error);
+            background: rgba(201,68,68,0.05);
+        }
 
+        /* === Views === */
+        .view {
+            display: none;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .view.active {
+            display: flex;
+            animation: viewFadeIn var(--transition-normal);
+        }
+
+        @keyframes viewFadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* === Connection View === */
         #connectionView {
-            padding: 20px 16px;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
             overflow-y: auto;
+            background: var(--bg-page);
+        }
+
+        .connection-card {
+            width: 100%;
+            max-width: 400px;
+            background: var(--bg-surface);
+            border-radius: var(--radius-lg);
+            padding: 32px 24px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .brand-title {
+            font-size: 24px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+        }
+
+        .brand-title .brand-accent {
+            color: var(--accent-primary);
+        }
+
+        .brand-subtitle {
+            font-size: 14px;
+            color: var(--text-tertiary);
+            text-align: center;
+            margin-bottom: 24px;
         }
 
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 16px;
         }
 
         .form-group label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             font-size: 13px;
-            color: var(--muted);
+            font-weight: 500;
+            color: var(--text-secondary);
         }
 
         .form-group input {
             width: 100%;
-            padding: 10px 12px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--bg);
-            color: #fff;
-            font-size: 14px;
+            padding: 10px 14px;
+            border: 1.5px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            font-size: 15px;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
         }
 
-        .form-group input:focus { outline: none; border-color: var(--accent); }
+        .form-group input::placeholder {
+            color: var(--text-placeholder);
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent-secondary);
+            box-shadow: 0 0 0 3px rgba(28,107,187,0.1);
+        }
 
         .btn-primary {
             width: 100%;
             padding: 12px;
             border: none;
-            border-radius: 8px;
-            background: var(--accent);
-            color: #000;
+            border-radius: var(--radius-sm);
+            background: var(--accent-primary);
+            color: #fff;
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
+            transition: all var(--transition-fast);
+            margin-top: 4px;
+            -webkit-tap-highlight-color: transparent;
         }
 
-        .btn-primary:hover { opacity: 0.9; }
+        .btn-primary:hover {
+            background: var(--accent-primary-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
 
-        /* === Client List === */
-        .client-item {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 14px;
-            margin-bottom: 10px;
+        .btn-primary:active {
+            transform: translateY(0);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .debug-toggle {
+            display: block;
+            margin: 16px auto 0;
+            background: none;
+            border: none;
+            color: var(--text-tertiary);
+            font-size: 12px;
             cursor: pointer;
-            transition: all 0.2s;
+            padding: 4px 8px;
+            transition: color var(--transition-fast);
         }
 
-        .client-item:hover { border-color: var(--accent); }
-        .client-item:active { transform: scale(0.98); }
+        .debug-toggle:hover { color: var(--text-secondary); }
 
-        .client-name { font-weight: 600; font-size: 15px; }
-        .client-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+        #debugPanel {
+            display: none;
+            margin-top: 12px;
+            padding: 10px 12px;
+            background: var(--bg-sunken);
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        #debugPanel.open { display: block; }
+
+        #debugLog { color: var(--accent-amber); }
+
+        .build-info {
+            font-size: 10px;
+            color: var(--text-placeholder);
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        /* === Client List View === */
+        #clientListView {
+            background: var(--bg-page);
+        }
+
+        .client-list-container {
+            padding: 16px;
+            max-width: 500px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .client-list-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 16px;
+            padding-left: 4px;
+        }
+
+        .client-item {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .client-item:hover {
+            border-color: var(--border-strong);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+
+        .client-item:active {
+            transform: translateY(0) scale(0.99);
+        }
+
+        .client-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-sunken);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .client-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .client-name {
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--text-primary);
+        }
+
+        .client-meta {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: 2px;
+        }
+
         .client-path {
-            font-size: 11px; color: #555; margin-top: 2px;
-            font-family: Monaco, Menlo, monospace;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-size: 11px;
+            color: var(--text-placeholder);
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            margin-top: 2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .client-arrow {
+            color: var(--text-placeholder);
+            font-size: 14px;
+            flex-shrink: 0;
+            transition: transform var(--transition-fast);
+        }
+
+        .client-item:hover .client-arrow {
+            transform: translateX(2px);
+            color: var(--text-tertiary);
         }
 
         .empty-state {
-            text-align: center; padding: 60px 20px; color: #666;
+            text-align: center;
+            padding: 48px 20px;
+        }
+
+        .empty-state .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.4;
+        }
+
+        .empty-state h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+            color: var(--text-tertiary);
+            line-height: 1.5;
         }
 
         /* === Chat View === */
@@ -164,6 +460,7 @@
             flex-direction: column;
             flex: 1;
             overflow: hidden;
+            position: relative;
         }
 
         #chatView.active { display: flex; }
@@ -174,139 +471,247 @@
             padding: 16px;
             padding-bottom: 8px;
             -webkit-overflow-scrolling: touch;
+            background: var(--bg-page);
+            overscroll-behavior: contain;
+            scroll-behavior: smooth;
         }
 
-        /* Chat bubbles */
+        .messages-container::-webkit-scrollbar { width: 4px; }
+        .messages-container::-webkit-scrollbar-thumb {
+            background: var(--border-default);
+            border-radius: var(--radius-full);
+        }
+
+        /* Chat welcome */
+        .chat-welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            padding: 48px 24px;
+        }
+
+        .chat-welcome .welcome-icon {
+            font-size: 56px;
+            margin-bottom: 16px;
+            opacity: 0.35;
+        }
+
+        .chat-welcome h2 {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .chat-welcome p {
+            font-size: 15px;
+            color: var(--text-tertiary);
+        }
+
+        /* Messages */
         .message {
             margin-bottom: 12px;
             max-width: 90%;
-            animation: fadeIn 0.2s ease;
         }
-
-        @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 
         .message.user {
             margin-left: auto;
+            animation: slideInRight var(--transition-normal);
         }
 
-        .message.assistant, .message.tool, .message.thinking {
+        .message.assistant, .message.thinking {
             margin-right: auto;
+            animation: slideInLeft var(--transition-normal);
         }
 
-        .bubble {
-            padding: 10px 14px;
-            border-radius: 16px;
-            font-size: 14px;
-            line-height: 1.6;
-            word-break: break-word;
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-12px); }
+            to { opacity: 1; transform: translateX(0); }
         }
 
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(12px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* User bubble */
         .message.user .bubble {
-            background: var(--user-bg);
-            border-bottom-right-radius: 4px;
-            color: #fff;
+            background: var(--user-bubble-bg);
+            color: var(--user-bubble-text);
+            padding: 10px 16px;
+            border-radius: 16px 16px 4px 16px;
+            font-size: 15px;
+            line-height: 1.55;
+            word-break: break-word;
+            box-shadow: var(--shadow-sm);
         }
 
+        /* Assistant bubble */
         .message.assistant .bubble {
-            background: var(--assistant-bg);
-            border-bottom-left-radius: 4px;
+            background: var(--assistant-bubble-bg);
+            color: var(--assistant-bubble-text);
+            padding: 16px 20px;
+            border-radius: var(--radius-lg);
+            font-size: 15px;
+            line-height: 1.65;
+            word-break: break-word;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-subtle);
         }
 
+        /* Thinking bubble */
         .message.thinking .bubble {
             background: var(--thinking-bg);
-            color: var(--muted);
-            font-style: italic;
+            color: var(--thinking-text);
+            border: 1px solid var(--thinking-border);
+            border-left: 3px solid var(--accent-amber);
+            padding: 10px 16px;
+            border-radius: var(--radius-md);
             font-size: 13px;
-            border-bottom-left-radius: 4px;
+            line-height: 1.5;
+            font-style: italic;
         }
 
-        /* Markdown content */
-        .bubble p { margin-bottom: 8px; }
-        .bubble p:last-child { margin-bottom: 0; }
-        .bubble code {
-            background: rgba(255,255,255,0.1);
+        /* Markdown in assistant bubble */
+        .message.assistant .bubble p { margin-bottom: 10px; }
+        .message.assistant .bubble p:last-child { margin-bottom: 0; }
+
+        .message.assistant .bubble code {
+            background: var(--bg-sunken);
             padding: 2px 6px;
             border-radius: 4px;
-            font-family: Monaco, Menlo, monospace;
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
             font-size: 13px;
-        }
-        .bubble pre {
-            background: #000;
-            padding: 12px;
-            border-radius: 8px;
-            overflow-x: auto;
-            margin: 8px 0;
-        }
-        .bubble pre code {
-            background: none;
-            padding: 0;
-            font-size: 12px;
-            line-height: 1.5;
-        }
-        .bubble ul, .bubble ol { padding-left: 20px; margin: 8px 0; }
-        .bubble li { margin: 4px 0; }
-        .bubble h1,.bubble h2,.bubble h3,.bubble h4 { margin: 12px 0 6px; }
-        .bubble a { color: var(--accent); }
-        .bubble blockquote {
-            border-left: 3px solid var(--accent);
-            padding-left: 12px;
-            margin: 8px 0;
-            color: var(--muted);
+            color: var(--accent-primary);
         }
 
-        /* Tool call cards */
+        .message.assistant .bubble pre {
+            background: var(--tool-output-bg);
+            color: var(--tool-output-text);
+            padding: 14px;
+            border-radius: var(--radius-sm);
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        .message.assistant .bubble pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+            font-size: 12.5px;
+            line-height: 1.55;
+        }
+
+        .message.assistant .bubble ul,
+        .message.assistant .bubble ol { padding-left: 22px; margin: 10px 0; }
+        .message.assistant .bubble li { margin: 4px 0; }
+        .message.assistant .bubble h1,
+        .message.assistant .bubble h2,
+        .message.assistant .bubble h3,
+        .message.assistant .bubble h4 {
+            margin: 16px 0 8px;
+            color: var(--text-primary);
+        }
+
+        .message.assistant .bubble a {
+            color: var(--accent-secondary);
+            text-decoration: none;
+        }
+
+        .message.assistant .bubble a:hover { text-decoration: underline; }
+
+        .message.assistant .bubble blockquote {
+            border-left: 3px solid var(--accent-primary);
+            padding-left: 14px;
+            margin: 10px 0;
+            color: var(--text-secondary);
+        }
+
+        /* Tool cards */
         .tool-card {
             background: var(--tool-bg);
-            border: 1px solid #2d4a2d;
-            border-radius: 10px;
-            margin-bottom: 8px;
+            border: 1px solid var(--tool-border);
+            border-radius: var(--radius-md);
+            margin-bottom: 12px;
             overflow: hidden;
+            max-width: 92%;
+            animation: slideInLeft var(--transition-normal);
+            box-shadow: var(--shadow-sm);
         }
 
         .tool-header {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 12px;
+            padding: 10px 14px;
             cursor: pointer;
             font-size: 13px;
             user-select: none;
+            background: var(--tool-header-bg);
+            transition: background var(--transition-fast);
+            min-height: 44px;
+            -webkit-tap-highlight-color: transparent;
         }
 
-        .tool-header:hover { background: rgba(255,255,255,0.05); }
+        .tool-header:hover { background: var(--border-default); }
 
-        .tool-icon { font-size: 14px; }
-        .tool-name { font-weight: 600; color: var(--green); }
+        .tool-icon { font-size: 15px; flex-shrink: 0; }
+
+        .tool-name {
+            font-weight: 600;
+            color: var(--tool-name-color);
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            font-size: 12.5px;
+        }
+
         .tool-args {
             flex: 1;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            color: var(--muted);
-            font-family: Monaco, Menlo, monospace;
-            font-size: 11px;
+            color: var(--text-tertiary);
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            font-size: 11.5px;
         }
-        .tool-toggle { color: var(--muted); font-size: 10px; transition: transform 0.2s; }
+
+        .tool-toggle {
+            color: var(--text-placeholder);
+            font-size: 10px;
+            transition: transform var(--transition-fast);
+            flex-shrink: 0;
+        }
+
         .tool-toggle.open { transform: rotate(90deg); }
 
         .tool-output {
-            display: none;
-            padding: 8px 12px;
-            border-top: 1px solid #2d4a2d;
-            max-height: 300px;
-            overflow-y: auto;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height var(--transition-normal) ease-in-out;
+            background: var(--tool-output-bg);
         }
 
-        .tool-output.open { display: block; }
+        .tool-output.open {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 12px 14px;
+        }
 
         .tool-output pre {
             margin: 0;
-            font-family: Monaco, Menlo, monospace;
-            font-size: 11px;
-            line-height: 1.5;
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            font-size: 11.5px;
+            line-height: 1.55;
             white-space: pre-wrap;
             word-break: break-all;
-            color: #aaa;
+            color: var(--tool-output-text);
         }
 
         /* Streaming indicator */
@@ -315,98 +720,178 @@
             align-items: center;
             gap: 6px;
             padding: 8px 16px;
-            color: var(--muted);
+            color: var(--text-tertiary);
             font-size: 13px;
+            font-style: italic;
         }
 
-        .streaming-dots span {
+        .streaming-bars {
+            display: flex;
+            gap: 3px;
+            align-items: center;
+        }
+
+        .streaming-bars span {
+            display: block;
+            width: 3px;
+            border-radius: 2px;
+            background: var(--accent-primary);
+            animation: streamPulse 1.2s ease-in-out infinite;
+        }
+
+        .streaming-bars span:nth-child(1) { height: 8px; animation-delay: 0s; }
+        .streaming-bars span:nth-child(2) { height: 14px; animation-delay: 0.15s; }
+        .streaming-bars span:nth-child(3) { height: 10px; animation-delay: 0.3s; }
+
+        @keyframes streamPulse {
+            0%, 100% { opacity: 0.3; transform: scaleY(0.6); }
+            50% { opacity: 1; transform: scaleY(1); }
+        }
+
+        /* System message */
+        .system-message {
+            text-align: center;
+            padding: 8px 16px;
+            font-size: 12px;
+            color: var(--text-tertiary);
+            animation: fadeInUp var(--transition-fast);
+        }
+
+        .system-message.error { color: var(--status-error); }
+
+        .system-message.cost {
             display: inline-block;
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
-            background: var(--accent);
-            animation: dotBounce 1.4s infinite ease-in-out both;
+            margin: 4px auto;
+            padding: 4px 12px;
+            border-radius: var(--radius-full);
+            font-size: 11px;
+            font-weight: 500;
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            background: var(--bg-sunken);
         }
-
-        .streaming-dots span:nth-child(1) { animation-delay: -0.32s; }
-        .streaming-dots span:nth-child(2) { animation-delay: -0.16s; }
-
-        @keyframes dotBounce { 0%,80%,100%{transform:scale(0)} 40%{transform:scale(1)} }
 
         /* === Input Bar === */
         .input-bar {
             display: flex;
             align-items: flex-end;
             gap: 8px;
-            padding: 10px 16px;
-            padding-bottom: max(10px, env(safe-area-inset-bottom));
-            background: var(--surface);
-            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            background: var(--bg-surface);
+            border-top: 1px solid var(--border-subtle);
             flex-shrink: 0;
         }
 
         .input-bar textarea {
             flex: 1;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 10px 16px;
-            color: #fff;
-            font-size: 15px;
+            background: var(--bg-sunken);
+            border: 1.5px solid var(--border-default);
+            border-radius: var(--radius-xl);
+            padding: 10px 18px;
+            color: var(--text-primary);
+            font-size: 16px;
             font-family: inherit;
             resize: none;
             max-height: 120px;
-            min-height: 40px;
-            line-height: 1.4;
+            min-height: 42px;
+            line-height: 1.45;
             outline: none;
+            transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
         }
 
-        .input-bar textarea:focus { border-color: var(--accent); }
+        .input-bar textarea:focus {
+            border-color: var(--accent-secondary);
+            box-shadow: 0 0 0 3px rgba(28,107,187,0.08);
+        }
 
-        .input-bar textarea::placeholder { color: #555; }
+        .input-bar textarea::placeholder { color: var(--text-placeholder); }
 
         .btn-send {
-            width: 40px;
-            height: 40px;
+            width: 42px;
+            height: 42px;
             border-radius: 50%;
             border: none;
-            background: var(--accent);
-            color: #000;
-            font-size: 18px;
+            background: var(--accent-primary);
+            color: #fff;
+            font-size: 16px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            transition: all 0.2s;
+            transition: all var(--transition-fast);
+            box-shadow: var(--shadow-sm);
+            -webkit-tap-highlight-color: transparent;
         }
 
-        .btn-send:hover { opacity: 0.9; transform: scale(1.05); }
-        .btn-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
-        /* === Build Info === */
-        .build-info {
-            font-size: 10px;
-            color: #444;
-            font-family: Monaco, Menlo, monospace;
+        .btn-send:hover {
+            background: var(--accent-primary-hover);
+            transform: scale(1.05);
+            box-shadow: var(--shadow-md);
         }
 
-        /* === Debug Panel === */
-        #debugPanel {
-            margin-top: 15px;
-            padding: 10px;
-            background: var(--bg);
-            border-radius: 8px;
-            font-size: 11px;
-            max-height: 120px;
-            overflow-y: auto;
+        .btn-send:active { transform: scale(0.95); }
+
+        .btn-send:disabled {
+            background: var(--border-default);
+            color: var(--text-placeholder);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
 
-        #debugLog { color: #ff6600; }
+        /* === Reconnect Overlay === */
+        .reconnect-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(245, 240, 232, 0.85);
+            backdrop-filter: blur(4px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+        }
+
+        .reconnect-overlay.active { display: flex; }
+
+        .reconnect-spinner {
+            width: 32px;
+            height: 32px;
+            border: 2.5px solid var(--border-default);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 12px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .reconnect-overlay p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
 
         /* === Responsive === */
-        @media (max-width: 768px) {
+        @media (min-width: 768px) {
+            .messages-container {
+                max-width: 700px;
+                margin: 0 auto;
+            }
+            .input-bar {
+                max-width: 700px;
+                margin: 0 auto;
+                width: 100%;
+            }
+            .message.user { max-width: 65%; }
+            .message.assistant { max-width: 85%; }
+            .tool-card { max-width: 85%; }
+        }
+
+        @media (max-width: 374px) {
             .message { max-width: 95%; }
+            .connection-card { padding: 20px 16px; }
+            .client-item { padding: 12px; }
         }
     </style>
 </head>
@@ -414,38 +899,44 @@
     <!-- Header -->
     <div class="header">
         <div class="header-left">
+            <h1>Claude <span class="brand-accent">Forward</span></h1>
+        </div>
+        <div class="status-pill">
             <span class="status-dot" id="statusDot"></span>
-            <h1>Claude Forward</h1>
-            <span class="status-text" id="statusText">未连接</span>
+            <span id="statusText">未连接</span>
         </div>
         <div class="header-actions" id="headerActions" style="display:none;">
-            <button class="btn-icon" onclick="newSession()">新会话</button>
-            <button class="btn-icon danger" onclick="detach()">断开</button>
+            <button class="btn-ghost" onclick="newSession()">新会话</button>
+            <button class="btn-ghost danger" onclick="detach()">断开</button>
         </div>
     </div>
 
     <!-- Connection View -->
     <div id="connectionView" class="view active">
-        <div class="form-group">
-            <label>服务器地址</label>
-            <input type="text" id="serverUrl" placeholder="wss://your-server:6022">
+        <div class="connection-card">
+            <div class="brand-title">Claude <span class="brand-accent">Forward</span></div>
+            <div class="brand-subtitle">远程编程，随时随地</div>
+            <div class="form-group">
+                <label>服务器地址</label>
+                <input type="text" id="serverUrl" placeholder="wss://your-server:6022">
+            </div>
+            <div class="form-group">
+                <label>Token</label>
+                <input type="password" id="token" placeholder="your-secret-token">
+            </div>
+            <button class="btn-primary" id="connectBtn" onclick="connect()">连接</button>
+            <button class="debug-toggle" onclick="toggleDebug()">显示日志</button>
+            <div id="debugPanel">
+                <div id="debugLog"></div>
+            </div>
+            <div class="build-info" id="buildInfo">__BUILD_INFO__</div>
         </div>
-        <div class="form-group">
-            <label>Token</label>
-            <input type="password" id="token" placeholder="your-secret-token">
-        </div>
-        <button class="btn-primary" onclick="connect()">连接</button>
-        <div id="debugPanel">
-            <div style="color:#888;margin-bottom:5px;">调试日志:</div>
-            <div id="debugLog"></div>
-        </div>
-        <div class="build-info" id="buildInfo">__BUILD_INFO__</div>
     </div>
 
     <!-- Client List View -->
     <div id="clientListView" class="view">
-        <div style="padding:16px;">
-            <h2 style="font-size:14px;color:var(--muted);margin-bottom:12px;">可用客户端</h2>
+        <div class="client-list-container">
+            <div class="client-list-title">可用客户端</div>
             <div id="clients"></div>
         </div>
     </div>
@@ -453,9 +944,15 @@
     <!-- Chat View -->
     <div id="chatView" class="view">
         <div class="messages-container" id="messagesContainer">
-            <div class="empty-state" id="chatEmpty">
-                <p style="font-size:16px;">已连接，发送消息开始对话</p>
+            <div class="chat-welcome" id="chatEmpty">
+                <div class="welcome-icon">&#9997;&#65039;</div>
+                <h2>开始对话</h2>
+                <p>发送消息，Claude 将为你远程编程</p>
             </div>
+        </div>
+        <div class="reconnect-overlay" id="reconnectOverlay">
+            <div class="reconnect-spinner"></div>
+            <p>重新连接中...</p>
         </div>
         <div class="input-bar">
             <textarea id="chatInput" rows="1" placeholder="输入消息..." onkeydown="handleInputKey(event)"></textarea>
@@ -490,6 +987,12 @@
             });
         }
 
+        // === Debug toggle ===
+        function toggleDebug() {
+            const panel = document.getElementById('debugPanel');
+            panel.classList.toggle('open');
+        }
+
         // === Connection ===
         function connect() {
             const serverUrl = document.getElementById('serverUrl').value;
@@ -515,6 +1018,7 @@
                     attachedClient = savedClient;
                     sendMessage({ type: 'attach', payload: { client_id: savedClient } });
                     isReconnecting = false;
+                    hideReconnect();
                 } else {
                     sendMessage({ type: 'list' });
                 }
@@ -530,6 +1034,7 @@
                 if (attachedClient) {
                     localStorage.setItem('cf_attached_client', attachedClient);
                     isReconnecting = true;
+                    showReconnect();
                     showDebug('保存 attach 状态，3s 后重连');
                     setTimeout(() => { if (isReconnecting) connect(); }, 3000);
                 }
@@ -572,28 +1077,26 @@
                 case 'chat_error':
                     isStreaming = false;
                     document.getElementById('sendBtn').disabled = false;
-                    addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'));
+                    addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
                     break;
                 case 'error':
                     if (msg.payload?.message?.includes('not found')) {
                         localStorage.removeItem('cf_attached_client');
                         isReconnecting = false;
                     }
-                    addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'));
+                    addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
                     break;
             }
         }
 
         function handleChatMessage(payload) {
             const container = document.getElementById('messagesContainer');
-            // Hide empty state
             const empty = document.getElementById('chatEmpty');
             if (empty) empty.style.display = 'none';
 
             switch (payload.event_type) {
                 case 'stream_delta':
                     if (!currentStreamEl) {
-                        // Start new streaming message
                         currentStreamEl = createMessageEl('assistant', '');
                         container.appendChild(currentStreamEl);
                         messageCount++;
@@ -606,13 +1109,11 @@
 
                 case 'text':
                     if (currentStreamEl) {
-                        // Finalize streaming
                         currentStreamText += payload.text;
                         currentStreamEl.querySelector('.bubble').innerHTML = renderMarkdown(currentStreamText);
                         currentStreamEl = null;
                         currentStreamText = '';
                     } else {
-                        // Complete text message
                         const el = createMessageEl('assistant', payload.text);
                         container.appendChild(el);
                         messageCount++;
@@ -649,7 +1150,7 @@
                         currentStreamText = '';
                     }
                     if (payload.cost_usd > 0) {
-                        addSystemMessage(`费用: $${payload.cost_usd.toFixed(4)}`);
+                        addSystemMessage(`费用: $${payload.cost_usd.toFixed(4)}`, 'cost');
                     }
                     scrollToBottom();
                     break;
@@ -665,14 +1166,18 @@
         function showClients(clients) {
             const container = document.getElementById('clients');
             if (!clients || clients.length === 0) {
-                container.innerHTML = '<div class="empty-state"><h2>没有可用的客户端</h2><p>请确保本地客户端已启动</p></div>';
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128187;</div><h2>没有可用的客户端</h2><p>请确保本地客户端已启动</p></div>';
                 return;
             }
             container.innerHTML = clients.map(c => `
                 <div class="client-item ${attachedClient === c.id ? 'active' : ''}" onclick="attach('${c.id}')">
-                    <div class="client-name">${c.name || c.id}</div>
-                    <div class="client-meta">PID: ${c.pid || '-'}</div>
-                    <div class="client-path">${c.path || ''}</div>
+                    <div class="client-icon">&#128187;</div>
+                    <div class="client-info">
+                        <div class="client-name">${c.name || c.id}</div>
+                        <div class="client-meta">PID: ${c.pid || '-'}</div>
+                        <div class="client-path">${c.path || ''}</div>
+                    </div>
+                    <span class="client-arrow">&#8250;</span>
                 </div>
             `).join('');
         }
@@ -708,10 +1213,10 @@
             return card;
         }
 
-        function addSystemMessage(text) {
+        function addSystemMessage(text, type) {
             const container = document.getElementById('messagesContainer');
             const div = document.createElement('div');
-            div.style.cssText = 'text-align:center;padding:8px;font-size:12px;color:var(--muted);';
+            div.className = 'system-message' + (type ? ' ' + type : '');
             div.textContent = text;
             container.appendChild(div);
             scrollToBottom();
@@ -752,9 +1257,9 @@
         function getToolIcon(name) {
             const icons = {
                 'Read': '&#128196;', 'Edit': '&#9997;', 'Write': '&#128190;',
-                'Bash': '&#128187;', 'Glob': '&#128269;', 'Grep': '&#128270;',
+                'Bash': '&#9654;', 'Glob': '&#128269;', 'Grep': '&#128270;',
             };
-            return icons[name] || '&#128295;';
+            return icons[name] || '&#9889;';
         }
 
         function formatJSON(input) {
@@ -780,6 +1285,16 @@
             });
         }
 
+        function showReconnect() {
+            const overlay = document.getElementById('reconnectOverlay');
+            if (overlay) overlay.classList.add('active');
+        }
+
+        function hideReconnect() {
+            const overlay = document.getElementById('reconnectOverlay');
+            if (overlay) overlay.classList.remove('active');
+        }
+
         // === Actions ===
         function attach(clientId) {
             attachedClient = clientId;
@@ -792,17 +1307,22 @@
             isReconnecting = false;
             localStorage.removeItem('cf_attached_client');
             document.getElementById('headerActions').style.display = 'none';
-            // Clear chat
-            document.getElementById('messagesContainer').innerHTML = '<div class="empty-state" id="chatEmpty"><p style="font-size:16px;">已连接，发送消息开始对话</p></div>';
-            messageCount = 0;
-            currentStreamEl = null;
-            currentStreamText = '';
-            currentToolCalls = {};
+            hideReconnect();
+            resetChat();
         }
 
         function newSession() {
             sendMessage({ type: 'new_session' });
-            document.getElementById('messagesContainer').innerHTML = '<div class="empty-state" id="chatEmpty"><p style="font-size:16px;">新会话已开始</p></div>';
+            resetChat();
+        }
+
+        function resetChat() {
+            document.getElementById('messagesContainer').innerHTML = `
+                <div class="chat-welcome" id="chatEmpty">
+                    <div class="welcome-icon">&#9997;&#65039;</div>
+                    <h2>开始对话</h2>
+                    <p>发送消息，Claude 将为你远程编程</p>
+                </div>`;
             messageCount = 0;
             currentStreamEl = null;
             currentStreamText = '';
@@ -816,7 +1336,6 @@
             const text = input.value.trim();
             if (!text || isStreaming) return;
 
-            // Add user message to chat
             const container = document.getElementById('messagesContainer');
             const empty = document.getElementById('chatEmpty');
             if (empty) empty.style.display = 'none';
@@ -825,14 +1344,11 @@
             container.appendChild(userEl);
             scrollToBottom();
 
-            // Send to server
             sendMessage({ type: 'chat_input', payload: { text: text } });
 
-            // Clear input
             input.value = '';
             input.style.height = 'auto';
 
-            // Disable send while processing
             isStreaming = true;
             document.getElementById('sendBtn').disabled = true;
         }
