@@ -358,6 +358,11 @@ func (c *Client) stopForwarding() {
 
 // handleChatInput 处理聊天输入，启动 Claude 并流式转发结果
 func (c *Client) handleChatInput(userID string, text string) {
+	// 立即发送确认，让 UI 知道消息已被接收
+	ackMsg, _ := protocol.NewMessage(protocol.TypeChatAck, nil)
+	ackMsg.To = userID
+	c.send <- ackMsg
+
 	if c.claude.IsRunning() {
 		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
 			Code:    409,

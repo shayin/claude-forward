@@ -970,6 +970,7 @@
         let currentStreamEl = null;
         let currentStreamText = '';
         let currentToolCalls = {};
+        let localThinkingEl = null; // 发送后立即显示的本地"思考中"占位
         let messageCount = 0;
         let chatHistory = []; // 持久化消息列表
 
@@ -1122,13 +1123,21 @@
                 case 'chat_message':
                     handleChatMessage(msg.payload);
                     break;
+                case 'chat_ack':
+                    // 客户端确认已收到消息，更新占位气泡状态
+                    if (localThinkingEl) {
+                        localThinkingEl.querySelector('.bubble').innerHTML = renderMarkdown('Claude 正在思考...');
+                    }
+                    break;
                 case 'chat_ready':
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     isStreaming = false;
                     currentStreamEl = null;
                     currentStreamText = '';
                     document.getElementById('sendBtn').disabled = false;
                     break;
                 case 'chat_error':
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     isStreaming = false;
                     document.getElementById('sendBtn').disabled = false;
                     addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
@@ -1152,6 +1161,8 @@
 
             switch (payload.event_type) {
                 case 'stream_delta':
+                    // 收到实际输出，移除本地占位气泡
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     if (!currentStreamEl) {
                         currentStreamEl = createMessageEl('assistant', '');
                         container.appendChild(currentStreamEl);
@@ -1164,6 +1175,7 @@
                     break;
 
                 case 'text':
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     if (currentStreamEl) {
                         currentStreamText += payload.text;
                         currentStreamEl.querySelector('.bubble').innerHTML = renderMarkdown(currentStreamText);
@@ -1182,6 +1194,8 @@
                     break;
 
                 case 'thinking':
+                    // 收到实际 thinking 事件，移除本地占位气泡
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     const thinkEl = createMessageEl('thinking', payload.text || '思考中...');
                     container.appendChild(thinkEl);
                     chatHistory.push({ type: 'thinking', text: payload.text || '思考中...' });
@@ -1190,6 +1204,7 @@
                     break;
 
                 case 'tool_start':
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     isStreaming = true;
                     document.getElementById('sendBtn').disabled = true;
                     const toolCard = createToolCard(payload.tool_id, payload.tool_name, payload.tool_input);
@@ -1425,6 +1440,11 @@
 
             isStreaming = true;
             document.getElementById('sendBtn').disabled = true;
+
+            // 立即显示"思考中"占位气泡，不等服务端响应
+            localThinkingEl = createMessageEl('thinking', '发送中...');
+            container.appendChild(localThinkingEl);
+            scrollToBottom();
         }
 
         function handleInputKey(e) {

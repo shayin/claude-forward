@@ -23,6 +23,7 @@ const (
 
 	// 聊天模式
 	TypeChatInput   MessageType = "chat_input"   // 用户发送聊天消息
+	TypeChatAck     MessageType = "chat_ack"     // 客户端确认收到聊天消息
 	TypeChatMessage MessageType = "chat_message"  // Claude 结构化输出事件
 	TypeChatReady   MessageType = "chat_ready"    // Claude 处理完毕，可接受新输入
 	TypeChatError   MessageType = "chat_error"    // Claude 处理错误
