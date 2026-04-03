@@ -8,7 +8,7 @@ all: build
 
 build: build-server build-client
 
-build-server:
+build-server: inject-build-info
 	@echo "Building server..."
 	@mkdir -p bin
 	go build -o $(BINARY_SERVER) ./cmd/server
@@ -17,6 +17,12 @@ build-client:
 	@echo "Building client..."
 	@mkdir -p bin
 	go build -o $(BINARY_CLIENT) ./cmd/client
+
+inject-build-info:
+	@GIT_VER=$$(git describe --tags --always --dirty 2>/dev/null || echo "unknown") && \
+	BUILD_TIME=$$(date '+%Y-%m-%d %H:%M:%S') && \
+	sed -i.bak "s|__BUILD_INFO__|$${GIT_VER} · $${BUILD_TIME}|" web/index.html && \
+	rm -f web/index.html.bak
 
 build-cli:
 	@echo "Building CLI..."

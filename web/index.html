@@ -126,24 +126,16 @@
             border-radius: 8px;
             overflow: hidden;
             display: none;
-            flex-direction: column;
         }
 
         .terminal-container.active {
-            display: flex;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            border-radius: 0;
-            z-index: 100;
+            display: block;
         }
 
         #terminal {
             padding: 10px;
-            flex: 1;
-            min-height: 0;
+            height: calc(100vh - 300px);
+            min-height: 400px;
         }
 
         .toolbar {
@@ -152,7 +144,6 @@
             padding: 10px;
             background: #16213e;
             border-top: 1px solid #333;
-            flex-shrink: 0;
         }
 
         .btn {
@@ -225,6 +216,13 @@
             border-color: #00d4ff;
         }
 
+        .build-info {
+            font-size: 11px;
+            color: #555;
+            margin-top: 6px;
+            font-family: Monaco, Menlo, monospace;
+        }
+
         .cert-notice {
             background: #2a1f1a;
             border: 1px solid #ff6600;
@@ -259,6 +257,10 @@
             .container {
                 padding: 10px;
             }
+
+            #terminal {
+                height: calc(100vh - 350px);
+            }
         }
     </style>
 </head>
@@ -270,6 +272,7 @@
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">未连接</span>
             </div>
+            <div class="build-info" id="buildInfo">__BUILD_INFO__</div>
         </div>
 
         <div class="cert-notice" id="certNotice">
@@ -548,7 +551,6 @@
             document.getElementById('terminalContainer').classList.add('active');
             document.getElementById('configForm').style.display = 'none';
             document.getElementById('clientList').style.display = 'none';
-            document.querySelector('.header').style.display = 'none';
 
             // 清空终端容器 DOM，确保没有残留
             const terminalEl = document.getElementById('terminal');
@@ -654,7 +656,6 @@
             document.getElementById('terminalContainer').classList.remove('active');
             document.getElementById('configForm').style.display = 'block';
             document.getElementById('clientList').style.display = 'block';
-            document.querySelector('.header').style.display = '';
             if (term) {
                 term.clear();
                 // 清空终端 DOM，避免残留
