@@ -971,6 +971,57 @@
         let currentStreamText = '';
         let currentToolCalls = {};
         let messageCount = 0;
+        let chatHistory = []; // 持久化消息列表
+
+        // === Chat History Persistence ===
+        function saveHistory() {
+            if (!attachedClient) return;
+            try {
+                localStorage.setItem('cf_history_' + attachedClient, JSON.stringify(chatHistory));
+            } catch(e) {}
+        }
+
+        function loadHistory() {
+            if (!attachedClient) return;
+            try {
+                const data = localStorage.getItem('cf_history_' + attachedClient);
+                if (data) chatHistory = JSON.parse(data);
+            } catch(e) { chatHistory = []; }
+        }
+
+        function clearHistory() {
+            if (attachedClient) {
+                localStorage.removeItem('cf_history_' + attachedClient);
+            }
+            chatHistory = [];
+        }
+
+        function restoreChatFromHistory() {
+            const container = document.getElementById('messagesContainer');
+            const empty = document.getElementById('chatEmpty');
+            if (chatHistory.length === 0) return;
+            if (empty) empty.style.display = 'none';
+
+            chatHistory.forEach(msg => {
+                switch(msg.type) {
+                    case 'user':
+                    case 'assistant':
+                    case 'thinking':
+                        container.appendChild(createMessageEl(msg.type, msg.text));
+                        messageCount++;
+                        break;
+                    case 'tool':
+                        const toolCard = createToolCard(msg.toolId, msg.toolName, msg.toolInput);
+                        container.appendChild(toolCard);
+                        messageCount++;
+                        break;
+                    case 'system':
+                        addSystemMessage(msg.text, msg.subtype || '');
+                        break;
+                }
+            });
+            scrollToBottom();
+        }
 
         // === Init ===
         function init() {
@@ -1057,6 +1108,8 @@
                     localStorage.setItem('cf_attached_client', attachedClient);
                     showView('chatView');
                     document.getElementById('headerActions').style.display = 'flex';
+                    loadHistory();
+                    restoreChatFromHistory();
                     break;
                 case 'detached':
                     attachedClient = null;
@@ -1079,6 +1132,8 @@
                     isStreaming = false;
                     document.getElementById('sendBtn').disabled = false;
                     addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
+                    chatHistory.push({ type: 'system', text: '错误: ' + (msg.payload?.message || '未知错误'), subtype: 'error' });
+                    saveHistory();
                     break;
                 case 'error':
                     if (msg.payload?.message?.includes('not found')) {
@@ -1112,12 +1167,16 @@
                     if (currentStreamEl) {
                         currentStreamText += payload.text;
                         currentStreamEl.querySelector('.bubble').innerHTML = renderMarkdown(currentStreamText);
+                        chatHistory.push({ type: 'assistant', text: currentStreamText });
+                        saveHistory();
                         currentStreamEl = null;
                         currentStreamText = '';
                     } else {
                         const el = createMessageEl('assistant', payload.text);
                         container.appendChild(el);
                         messageCount++;
+                        chatHistory.push({ type: 'assistant', text: payload.text });
+                        saveHistory();
                     }
                     scrollToBottom();
                     break;
@@ -1125,6 +1184,8 @@
                 case 'thinking':
                     const thinkEl = createMessageEl('thinking', payload.text || '思考中...');
                     container.appendChild(thinkEl);
+                    chatHistory.push({ type: 'thinking', text: payload.text || '思考中...' });
+                    saveHistory();
                     scrollToBottom();
                     break;
 
@@ -1134,11 +1195,16 @@
                     const toolCard = createToolCard(payload.tool_id, payload.tool_name, payload.tool_input);
                     container.appendChild(toolCard);
                     currentToolCalls[payload.tool_id] = toolCard;
+                    chatHistory.push({ type: 'tool', toolId: payload.tool_id, toolName: payload.tool_name, toolInput: payload.tool_input });
+                    saveHistory();
                     scrollToBottom();
                     break;
 
                 case 'tool_end':
                     if (currentStreamEl) {
+                        // 保存流式累积的文本
+                        chatHistory.push({ type: 'assistant', text: currentStreamText });
+                        saveHistory();
                         currentStreamEl = null;
                         currentStreamText = '';
                     }
@@ -1146,12 +1212,16 @@
 
                 case 'result':
                     if (currentStreamEl) {
+                        chatHistory.push({ type: 'assistant', text: currentStreamText });
+                        saveHistory();
                         currentStreamEl.querySelector('.bubble').innerHTML = renderMarkdown(currentStreamText);
                         currentStreamEl = null;
                         currentStreamText = '';
                     }
                     if (payload.cost_usd > 0) {
                         addSystemMessage(`费用: $${payload.cost_usd.toFixed(4)}`, 'cost');
+                        chatHistory.push({ type: 'system', text: `费用: $${payload.cost_usd.toFixed(4)}`, subtype: 'cost' });
+                        saveHistory();
                     }
                     scrollToBottom();
                     break;
@@ -1324,6 +1394,7 @@
                     <h2>开始对话</h2>
                     <p>发送消息，Claude 将为你远程编程</p>
                 </div>`;
+            clearHistory();
             messageCount = 0;
             currentStreamEl = null;
             currentStreamText = '';
@@ -1343,6 +1414,8 @@
 
             const userEl = createMessageEl('user', text);
             container.appendChild(userEl);
+            chatHistory.push({ type: 'user', text: text });
+            saveHistory();
             scrollToBottom();
 
             sendMessage({ type: 'chat_input', payload: { text: text } });
