@@ -164,9 +164,13 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 		// 聊天输入/新会话：从 user 转发到 client
 		h.handleChatUserToClient(conn, msg)
 
-	case protocol.TypeChatMessage, protocol.TypeChatReady, protocol.TypeChatError, protocol.TypeChatAck, protocol.TypeSessionInfo:
-		// 聊天消息：从 client 转发到 user
+	case protocol.TypeChatMessage, protocol.TypeChatReady, protocol.TypeChatError, protocol.TypeChatAck, protocol.TypeSessionInfo, protocol.TypePermissionRequest:
+		// 聊天消息/权限请求：从 client 转发到 user
 		h.handleChatClientToUser(conn, msg)
+
+	case protocol.TypePermissionResponse:
+		// 权限审批结果：从 user 转发到 client
+		h.handleChatUserToClient(conn, msg)
 
 	case protocol.TypePong:
 		// 心跳响应，重置读超时

@@ -873,6 +873,101 @@
             color: var(--text-secondary);
         }
 
+        /* === Permission Dialog === */
+        .permission-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            padding: 16px;
+        }
+        .permission-overlay.active { display: flex; }
+        .permission-dialog {
+            background: var(--bg-surface);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: var(--shadow-lg);
+        }
+        .permission-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .permission-tool-name {
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            font-size: 13px;
+            color: var(--accent-secondary);
+            font-weight: 600;
+            padding: 2px 8px;
+            background: rgba(28,107,187,0.08);
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 12px;
+        }
+        .permission-input-preview {
+            background: var(--bg-sunken);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            font-family: 'SF Mono', Menlo, Monaco, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+        .permission-countdown {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-bottom: 12px;
+        }
+        .permission-countdown.urgent {
+            color: var(--status-error);
+            font-weight: 600;
+        }
+        .permission-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .permission-actions button {
+            flex: 1;
+            padding: 10px;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: none;
+        }
+        .btn-approve {
+            background: var(--accent-green);
+            color: white;
+        }
+        .btn-approve:active { opacity: 0.85; }
+        .btn-deny {
+            background: var(--bg-sunken);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+        }
+        .btn-deny:active {
+            background: var(--border-default);
+            color: var(--status-error);
+            border-color: var(--status-error);
+        }
+
         /* === Responsive === */
         @media (min-width: 768px) {
             .messages-container {
@@ -955,6 +1050,18 @@
             <div class="reconnect-spinner"></div>
             <p>重新连接中...</p>
         </div>
+        <div class="permission-overlay" id="permissionOverlay">
+            <div class="permission-dialog">
+                <div class="permission-title">&#9888;&#65039; 工具权限请求</div>
+                <div class="permission-tool-name" id="permissionToolName"></div>
+                <div class="permission-input-preview" id="permissionInputPreview"></div>
+                <div class="permission-countdown" id="permissionCountdown"></div>
+                <div class="permission-actions">
+                    <button class="btn-deny" onclick="respondPermission(false)">拒绝</button>
+                    <button class="btn-approve" onclick="respondPermission(true)">批准</button>
+                </div>
+            </div>
+        </div>
         <div class="input-bar">
             <textarea id="chatInput" rows="1" placeholder="输入消息..." onkeydown="handleInputKey(event)"></textarea>
             <button class="btn-send" id="sendBtn" onclick="sendChatMessage()">&#9654;</button>
@@ -973,6 +1080,8 @@
         let localThinkingEl = null; // 发送后立即显示的本地"思考中"占位
         let messageCount = 0;
         let chatHistory = []; // 持久化消息列表
+        let currentPermissionRequest = null;
+        let permissionCountdownInterval = null;
 
         // === Chat History Persistence ===
         function saveHistory() {
@@ -1150,6 +1259,9 @@
                         isReconnecting = false;
                     }
                     addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
+                    break;
+                case 'permission_request':
+                    showPermissionDialog(msg.payload);
                     break;
             }
         }
@@ -1485,6 +1597,62 @@
                     if (el && text) el.textContent = text;
                 })
                 .catch(() => {});
+        }
+
+        // === Permission Dialog ===
+        function showPermissionDialog(payload) {
+            currentPermissionRequest = payload.request_id;
+            document.getElementById('permissionToolName').textContent = payload.tool_name;
+
+            let inputText = '';
+            try {
+                const obj = typeof payload.tool_input === 'string' ? JSON.parse(payload.tool_input) : payload.tool_input;
+                inputText = JSON.stringify(obj, null, 2);
+            } catch(e) {
+                inputText = String(payload.tool_input || '');
+            }
+            document.getElementById('permissionInputPreview').textContent = inputText;
+            document.getElementById('permissionOverlay').classList.add('active');
+
+            // Countdown
+            const elapsed = (Date.now() - (payload.timestamp * 1000)) / 1000;
+            const remaining = Math.max(0, Math.round(60 - elapsed));
+            updateCountdown(remaining);
+
+            permissionCountdownInterval = setInterval(() => {
+                const el = document.getElementById('permissionCountdown');
+                const parts = el.textContent.split(': ');
+                let secs = parseInt(parts[1]) - 1;
+                if (secs <= 0) {
+                    clearInterval(permissionCountdownInterval);
+                    respondPermission(false);
+                    return;
+                }
+                updateCountdown(secs);
+            }, 1000);
+        }
+
+        function updateCountdown(secs) {
+            const el = document.getElementById('permissionCountdown');
+            el.textContent = '自动拒绝倒计时: ' + secs + 's';
+            el.className = 'permission-countdown' + (secs <= 10 ? ' urgent' : '');
+        }
+
+        function respondPermission(approved) {
+            if (!currentPermissionRequest) return;
+            sendMessage({
+                type: 'permission_response',
+                payload: {
+                    request_id: currentPermissionRequest,
+                    approved: approved
+                }
+            });
+            document.getElementById('permissionOverlay').classList.remove('active');
+            if (permissionCountdownInterval) {
+                clearInterval(permissionCountdownInterval);
+                permissionCountdownInterval = null;
+            }
+            currentPermissionRequest = null;
         }
 
         // === Start ===

@@ -52,10 +52,11 @@ type ClaudeManager struct {
 
 // ClaudeConfig Claude 相关配置
 type ClaudeConfig struct {
-	Path           string `yaml:"path"`            // claude 二进制路径，默认 "claude"
-	AllowedTools   string `yaml:"allowed_tools"`   // 允许的工具列表
-	PermissionMode string `yaml:"permission_mode"` // 权限模式
-	MaxTurns       int    `yaml:"max_turns"`       // 最大轮次
+	Path             string `yaml:"path"`                          // claude 二进制路径，默认 "claude"
+	AllowedTools     string `yaml:"allowed_tools"`                 // 允许的工具列表
+	PermissionMode   string `yaml:"permission_mode"`               // 权限模式
+	MaxTurns         int    `yaml:"max_turns"`                     // 最大轮次
+	HookSettingsPath string `yaml:"-"` // Hook 配置文件路径（程序设置，不从 YAML 读取）
 }
 
 // NewClaudeManager 创建 Claude 管理器
@@ -68,6 +69,13 @@ func NewClaudeManager(config ClaudeConfig) *ClaudeManager {
 		events:  make(chan ClaudeEvent, 256),
 		running: false,
 	}
+}
+
+// SetHookSettingsPath 设置 Hook 配置文件路径
+func (cm *ClaudeManager) SetHookSettingsPath(path string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.config.HookSettingsPath = path
 }
 
 // SessionID 返回当前会话 ID
@@ -118,6 +126,9 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 	}
 	if cm.config.PermissionMode != "" {
 		args = append(args, "--permission-mode", cm.config.PermissionMode)
+	}
+	if cm.config.HookSettingsPath != "" {
+		args = append(args, "--settings", cm.config.HookSettingsPath)
 	}
 	if cm.config.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", cm.config.MaxTurns))

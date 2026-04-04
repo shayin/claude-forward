@@ -41,6 +41,10 @@ const (
 	TypePing MessageType = "ping"
 	TypePong MessageType = "pong"
 
+	// 权限审批
+	TypePermissionRequest  MessageType = "permission_request"  // 客户端请求用户审批工具权限
+	TypePermissionResponse MessageType = "permission_response" // 用户返回权限审批结果
+
 	// 错误
 	TypeError MessageType = "error"
 )
@@ -134,6 +138,20 @@ type ChatMessagePayload struct {
 type SessionInfoPayload struct {
 	SessionID string `json:"session_id"`
 	Path      string `json:"path"`
+}
+
+// PermissionRequestPayload 权限请求载荷
+type PermissionRequestPayload struct {
+	RequestID string          `json:"request_id"`
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+	Timestamp int64           `json:"timestamp"`
+}
+
+// PermissionResponsePayload 权限响应载荷
+type PermissionResponsePayload struct {
+	RequestID string `json:"request_id"`
+	Approved  bool   `json:"approved"`
 }
 
 // NewMessage 创建新消息

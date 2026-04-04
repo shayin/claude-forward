@@ -21,6 +21,9 @@ type Client struct {
 	send          chan *protocol.Message
 	tmux          *TmuxManager
 	claude        *ClaudeManager
+	hookServer    *HookServer // 权限 Hook 服务器
+	attachedUser  string      // 当前连接的用户 ID
+	userMu        sync.RWMutex
 	mu            sync.Mutex
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -107,6 +110,11 @@ func (c *Client) Run() {
 
 	// 初始化 Claude 管理器
 	c.claude = NewClaudeManager(c.config.Claude)
+
+	// 初始化权限系统
+	if err := c.initPermissionSystem(); err != nil {
+		log.Printf("Warning: failed to init permission system: %v", err)
+	}
 
 	if c.config.Tmux.AutoStart {
 		if err := c.tmux.EnsureSession(); err != nil {
@@ -230,6 +238,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 	case protocol.TypeAttach:
 		// 用户请求连接
 		log.Printf("User attached: %s", msg.From)
+		c.setUser(msg.From)
 
 		// 停止之前的 forwarding goroutine
 		c.stopForwarding()
@@ -260,6 +269,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 
 	case protocol.TypeDetach:
 		log.Printf("User detached: %s", msg.From)
+		c.setUser("")
 		// 停止 forwarding
 		c.stopForwarding()
 		// 关闭 tmux 连接
@@ -301,6 +311,17 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		log.Printf("Starting new Claude session")
 		c.claude.Abort()
 		c.claude.ResetSession()
+
+	case protocol.TypePermissionResponse:
+		// Web UI 返回权限审批结果
+		var payload protocol.PermissionResponsePayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			log.Printf("Failed to parse permission response: %v", err)
+			return
+		}
+		if c.hookServer != nil {
+			c.hookServer.HandleResponse(payload.RequestID, payload.Approved)
+		}
 
 	case protocol.TypeSessionInfo:
 		infoMsg, _ := protocol.NewMessage(protocol.TypeSessionInfo, protocol.SessionInfoPayload{
@@ -408,4 +429,44 @@ func (c *Client) handleChatInput(userID string, text string) {
 			c.send <- readyMsg
 		}
 	}
+}
+
+// initPermissionSystem 初始化权限系统
+func (c *Client) initPermissionSystem() error {
+	checker, err := NewPermissionChecker()
+	if err != nil {
+		return fmt.Errorf("failed to init permission checker: %w", err)
+	}
+
+	timeout := 60 * time.Second
+
+	// sendToUI 回调：将权限请求发送给当前连接的 Web UI 用户
+	sendToUI := func(msg *protocol.Message) {
+		c.userMu.RLock()
+		uid := c.attachedUser
+		c.userMu.RUnlock()
+		if uid != "" {
+			msg.To = uid
+			c.send <- msg
+		}
+	}
+
+	hs, err := NewHookServer(checker, timeout, sendToUI)
+	if err != nil {
+		return fmt.Errorf("failed to start hook server: %w", err)
+	}
+	c.hookServer = hs
+	log.Printf("Permission hook server started on port %d", hs.Port())
+
+	c.claude.SetHookSettingsPath(hs.SettingsPath())
+	log.Printf("Hook settings file: %s", hs.SettingsPath())
+
+	return nil
+}
+
+// setUser 设置当前连接的用户 ID
+func (c *Client) setUser(userID string) {
+	c.userMu.Lock()
+	defer c.userMu.Unlock()
+	c.attachedUser = userID
 }
