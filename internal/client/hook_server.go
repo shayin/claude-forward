@@ -213,22 +213,6 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 	)
 
 	settings := map[string]any{
-		"permissions": map[string]any{
-			"allow": []string{
-				"Bash",
-				"Read",
-				"Edit",
-				"Write",
-				"Glob",
-				"Grep",
-				"WebSearch",
-				"WebFetch",
-				"NotebookEdit",
-				"LSP",
-			},
-			"ask":  []string{},
-			"deny": []string{},
-		},
 		"hooks": map[string]any{
 			"PreToolUse": []map[string]any{
 				{

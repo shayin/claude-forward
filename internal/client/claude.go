@@ -54,7 +54,6 @@ type ClaudeManager struct {
 type ClaudeConfig struct {
 	Path             string `yaml:"path"`                          // claude 二进制路径，默认 "claude"
 	AllowedTools     string `yaml:"allowed_tools"`                 // 允许的工具列表
-	PermissionMode   string `yaml:"permission_mode"`               // 权限模式
 	MaxTurns         int    `yaml:"max_turns"`                     // 最大轮次
 	HookSettingsPath string `yaml:"-"` // Hook 配置文件路径（程序设置，不从 YAML 读取）
 }
@@ -124,11 +123,8 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 	if cm.config.AllowedTools != "" {
 		args = append(args, "--allowedTools", cm.config.AllowedTools)
 	}
-	// 使用 --permission-mode bypassPermissions 绕过 Claude 内部权限系统
-	// 同时在 --settings 文件中也配置了 permissions 来兜底
-	if cm.config.PermissionMode != "" {
-		args = append(args, "--permission-mode", cm.config.PermissionMode)
-	}
+	// --dangerously-skip-permissions: 跳过 Claude 内部交互式权限提示，hooks 仍正常触发
+	args = append(args, "--dangerously-skip-permissions")
 	if cm.config.HookSettingsPath != "" {
 		args = append(args, "--settings", cm.config.HookSettingsPath)
 	}
