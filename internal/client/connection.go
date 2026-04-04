@@ -480,15 +480,20 @@ func (c *Client) handleChatInput(userID string, text string) {
 	// 事件同时追加到 sessionEvents（Client 级别），即使 goroutine 退出也不丢失
 	for event := range c.claude.Stream() {
 		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
-			EventType:  string(event.Type),
-			Text:       event.Text,
-			ToolID:     event.ToolID,
-			ToolName:   event.ToolName,
-			ToolInput:  event.ToolInput,
-			ToolOutput: event.ToolOutput,
-			CostUSD:    event.CostUSD,
-			IsPartial:  event.IsPartial,
-			SessionID:  event.SessionID,
+			EventType:                string(event.Type),
+			Text:                     event.Text,
+			ToolID:                   event.ToolID,
+			ToolName:                 event.ToolName,
+			ToolInput:                event.ToolInput,
+			ToolOutput:               event.ToolOutput,
+			CostUSD:                  event.CostUSD,
+			IsPartial:                event.IsPartial,
+			SessionID:                event.SessionID,
+			InputTokens:              event.InputTokens,
+			OutputTokens:             event.OutputTokens,
+			CacheCreationInputTokens: event.CacheCreationInputTokens,
+			CacheReadInputTokens:     event.CacheReadInputTokens,
+			ContextWindow:            event.ContextWindow,
 		})
 
 		// 追加到会话事件缓冲，并判断是否应该发送给用户

@@ -132,6 +132,12 @@ type ChatMessagePayload struct {
 	CostUSD    float64         `json:"cost_usd,omitempty"`    // 费用
 	IsPartial  bool            `json:"is_partial,omitempty"`  // 是否为流式片段
 	SessionID  string          `json:"session_id,omitempty"`  // Claude 会话 ID
+	// Token 用量
+	InputTokens              int `json:"input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	ContextWindow            int `json:"context_window,omitempty"`
 }
 
 // SessionInfoPayload 会话元数据

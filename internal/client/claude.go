@@ -37,6 +37,12 @@ type ClaudeEvent struct {
 	ToolOutput string            `json:"tool_output,omitempty"`
 	CostUSD    float64           `json:"cost_usd,omitempty"`
 	IsPartial  bool              `json:"is_partial,omitempty"`
+	// Token 用量（来自 result 事件）
+	InputTokens              int `json:"input_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	ContextWindow            int `json:"context_window,omitempty"`
 }
 
 // ClaudeManager 管理 Claude CLI 调用
@@ -293,14 +299,33 @@ func parseJSONLLine(line string) []ClaudeEvent {
 			Result    string  `json:"result"`
 			SessionID string  `json:"session_id"`
 			CostUSD   float64 `json:"total_cost_usd"`
+			Usage     struct {
+				InputTokens              int `json:"input_tokens"`
+				OutputTokens             int `json:"output_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			} `json:"usage"`
+			ModelUsage map[string]struct {
+				ContextWindow int `json:"contextWindow"`
+			} `json:"modelUsage"`
 		}
 		if err := json.Unmarshal([]byte(line), &msg); err == nil {
-			events = append(events, ClaudeEvent{
-				Type:      EventResult,
-				Text:      msg.Result,
-				SessionID: msg.SessionID,
-				CostUSD:   msg.CostUSD,
-			})
+			evt := ClaudeEvent{
+				Type:                    EventResult,
+				Text:                    msg.Result,
+				SessionID:               msg.SessionID,
+				CostUSD:                 msg.CostUSD,
+				InputTokens:             msg.Usage.InputTokens,
+				OutputTokens:            msg.Usage.OutputTokens,
+				CacheCreationInputTokens: msg.Usage.CacheCreationInputTokens,
+				CacheReadInputTokens:    msg.Usage.CacheReadInputTokens,
+			}
+			// 从 modelUsage 提取 contextWindow
+			for _, m := range msg.ModelUsage {
+				evt.ContextWindow = m.ContextWindow
+				break
+			}
+			events = append(events, evt)
 		}
 
 	default:

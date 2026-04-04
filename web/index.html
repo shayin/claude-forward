@@ -1361,9 +1361,22 @@
                         currentStreamEl = null;
                         currentStreamText = '';
                     }
+                    // 构建用量信息
+                    const usageParts = [];
                     if (payload.cost_usd > 0) {
-                        addSystemMessage(`费用: $${payload.cost_usd.toFixed(4)}`, 'cost');
-                        chatHistory.push({ type: 'system', text: `费用: $${payload.cost_usd.toFixed(4)}`, subtype: 'cost' });
+                        usageParts.push(`费用: $${payload.cost_usd.toFixed(4)}`);
+                    }
+                    if (payload.input_tokens > 0) {
+                        const totalTokens = payload.input_tokens + payload.output_tokens;
+                        const ctxWin = payload.context_window || 200000;
+                        const pct = ((totalTokens / ctxWin) * 100).toFixed(1);
+                        const fmt = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n;
+                        usageParts.push(`上下文: ${fmt(totalTokens)} / ${fmt(ctxWin)} (${pct}%)`);
+                    }
+                    if (usageParts.length > 0) {
+                        const usageText = usageParts.join(' | ');
+                        addSystemMessage(usageText, 'cost');
+                        chatHistory.push({ type: 'system', text: usageText, subtype: 'cost' });
                         saveHistory();
                     }
                     scrollToBottom();
