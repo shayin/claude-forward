@@ -226,6 +226,8 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 				"NotebookEdit",
 				"LSP",
 			},
+			"ask":  []string{},
+			"deny": []string{},
 		},
 		"hooks": map[string]any{
 			"PreToolUse": []map[string]any{

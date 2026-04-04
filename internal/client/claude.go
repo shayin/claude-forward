@@ -124,8 +124,11 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 	if cm.config.AllowedTools != "" {
 		args = append(args, "--allowedTools", cm.config.AllowedTools)
 	}
-	// 不再使用 --permission-mode，改为通过 --settings 文件中的 permissions 配置绕过权限系统
-	// 这样避免某些 Claude Code 版本因 --permissionMode 内部错误导致工具不执行
+	// 使用 --permission-mode bypassPermissions 绕过 Claude 内部权限系统
+	// 同时在 --settings 文件中也配置了 permissions 来兜底
+	if cm.config.PermissionMode != "" {
+		args = append(args, "--permission-mode", cm.config.PermissionMode)
+	}
 	if cm.config.HookSettingsPath != "" {
 		args = append(args, "--settings", cm.config.HookSettingsPath)
 	}
