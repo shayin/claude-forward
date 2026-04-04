@@ -1225,10 +1225,9 @@
                     currentToolCalls = {};
                     if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     document.getElementById('sendBtn').disabled = false;
-                    // 清空 DOM 后恢复历史，避免重复追加
+                    // 清空 DOM 和历史，由 Client 回放完整会话事件重建
                     resetChatDOM();
-                    loadHistory();
-                    restoreChatFromHistory();
+                    clearHistory();
                     break;
                 case 'detached':
                     attachedClient = null;

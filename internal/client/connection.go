@@ -30,6 +30,12 @@ type Client struct {
 	forwardCancel context.CancelFunc // 用于停止 forwarding goroutine
 	forwardMu     sync.Mutex
 	connClosed    int32 // 连接是否已关闭的标志（用于防止重复关闭）
+
+	// 会话级别事件缓冲：存储当前 Claude 会话的所有事件
+	// 在 handleChatInput goroutine 退出后仍保留，支持断线重连后完整回放
+	sessionEvents []protocol.Message
+	sentUpTo      int         // 已发送到用户的事件索引（用于去重）
+	sessionMu     sync.Mutex  // 保护 sessionEvents 和 sentUpTo
 }
 
 // NewClient 创建客户端
@@ -238,7 +244,6 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 	case protocol.TypeAttach:
 		// 用户请求连接
 		log.Printf("User attached: %s", msg.From)
-		c.setUser(msg.From)
 
 		// 停止之前的 forwarding goroutine
 		c.stopForwarding()
@@ -254,30 +259,55 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		}
 
 		// 先发送当前屏幕内容给前端（在启动转发之前）
-		// 这样可以确保刷新页面后能立即显示内容
 		if output, err := c.tmux.CaptureOutput(); err == nil && output != "" {
 			outputMsg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
 				Data: output,
 			})
 			outputMsg.To = msg.From
 			c.send <- outputMsg
-			log.Printf("Sent captured screen content: %d bytes", len(output))
 		}
 
 		// 启动转发
 		go c.startForwarding(msg.From)
 
-		// 报告 Claude 当前状态：如果 Claude 已完成且 handleChatInput 已退出，
-		// 需要兜底发送 chat_ready 以解除 UI 阻塞
+		// === 会话事件回放 ===
+		// 1. 先复制当前所有事件快照，标记为已发送
+		c.sessionMu.Lock()
+		events := make([]protocol.Message, len(c.sessionEvents))
+		copy(events, c.sessionEvents)
+		snapshotLen := len(c.sessionEvents)
+		c.sentUpTo = snapshotLen
+		c.sessionMu.Unlock()
+
+		// 2. 回放快照事件（此时 setUser 还没调用，goroutine 不会干扰）
+		for i := range events {
+			events[i].To = msg.From
+			c.send <- &events[i]
+		}
+
+		// 3. 设置用户 ID（之后 goroutine 可以发送新事件）
+		c.setUser(msg.From)
+
+		// 4. 发送回放期间新增的事件（goroutine 可能在这期间追加了事件但没有发送）
+		c.sessionMu.Lock()
+		for i := c.sentUpTo; i < len(c.sessionEvents); i++ {
+			remaining := c.sessionEvents[i]
+			remaining.To = msg.From
+			c.send <- &remaining
+		}
+		c.sentUpTo = len(c.sessionEvents)
+		c.sessionMu.Unlock()
+
+		// 5. 如果 Claude 已完成，发送 chat_ready
 		if !c.claude.IsRunning() {
 			readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
 				SessionID: c.claude.SessionID(),
 			})
 			readyMsg.To = msg.From
 			c.send <- readyMsg
-			log.Printf("Sent chat_ready to reattached user (Claude idle)")
+			log.Printf("Sent chat_ready to reattached user (Claude idle, replayed %d events)", len(events))
 		} else {
-			log.Printf("Claude still running, events will resume via buffer replay")
+			log.Printf("Claude still running, replayed %d events, goroutine will send new ones", len(events))
 		}
 
 	case protocol.TypeDetach:
@@ -324,6 +354,10 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		log.Printf("Starting new Claude session")
 		c.claude.Abort()
 		c.claude.ResetSession()
+		c.sessionMu.Lock()
+		c.sessionEvents = nil
+		c.sentUpTo = 0
+		c.sessionMu.Unlock()
 
 	case protocol.TypePermissionResponse:
 		var payload protocol.PermissionResponsePayload
@@ -434,9 +468,8 @@ func (c *Client) handleChatInput(userID string, text string) {
 		return
 	}
 
-	// 流式转发事件到用户，支持断线重连后的缓冲和回放
-	var pendingBuffer []protocol.Message
-
+	// 流式转发事件到用户
+	// 事件同时追加到 sessionEvents（Client 级别），即使 goroutine 退出也不丢失
 	for event := range c.claude.Stream() {
 		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 			EventType:  string(event.Type),
@@ -449,36 +482,34 @@ func (c *Client) handleChatInput(userID string, text string) {
 			IsPartial:  event.IsPartial,
 			SessionID:  event.SessionID,
 		})
-		uid := currentUserID()
 
-		if uid == "" {
-			// 无用户连接，缓冲事件
-			pendingBuffer = append(pendingBuffer, *msg)
-		} else {
-			// 有用户，先回放缓冲的事件
-			if len(pendingBuffer) > 0 {
-				for i := range pendingBuffer {
-					pendingBuffer[i].To = uid
-					c.send <- &pendingBuffer[i]
-				}
-				pendingBuffer = nil
-			}
+		// 追加到会话事件缓冲，并判断是否应该发送给用户
+		c.sessionMu.Lock()
+		c.sessionEvents = append(c.sessionEvents, *msg)
+		myIndex := len(c.sessionEvents) - 1
+		shouldSend := myIndex >= c.sentUpTo
+		if shouldSend {
+			c.sentUpTo = len(c.sessionEvents)
+		}
+		c.sessionMu.Unlock()
+
+		uid := currentUserID()
+		if uid != "" && shouldSend {
 			msg.To = uid
 			c.send <- msg
 		}
 
-		// result 事件表示轮次结束
+		// result 事件表示轮次结束，发送 chat_ready
 		if event.Type == EventResult {
-			readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
-				SessionID: c.claude.SessionID(),
-			})
 			uid := currentUserID()
-			if uid == "" {
-				pendingBuffer = append(pendingBuffer, *readyMsg)
-			} else {
+			if uid != "" {
+				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+					SessionID: c.claude.SessionID(),
+				})
 				readyMsg.To = uid
 				c.send <- readyMsg
 			}
+			// 如果用户不在线，chat_ready 由 TypeAttach handler 在重连时发送
 		}
 	}
 }
