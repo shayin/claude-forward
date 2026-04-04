@@ -41,3 +41,6 @@ test-*.yaml
 # Generated config files (templates are tracked)
 configs/server.yaml
 configs/client.yaml
+
+# Generated certificates
+certs/
