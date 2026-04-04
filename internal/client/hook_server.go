@@ -206,38 +206,43 @@ func (hs *HookServer) handleAskPermission(w http.ResponseWriter, toolName string
 }
 
 // GenerateSettingsFile 生成包含 PreToolUse Hook 配置的临时 settings 文件
+// 读取用户 ~/.claude/settings.json，保留 env 等关键配置，但覆盖 permissions.deny 为空
 func (hs *HookServer) GenerateSettingsFile() (string, error) {
 	hookCommand := fmt.Sprintf(
 		`sh -c 'curl -sf -X POST http://127.0.0.1:%d/hook/pre-tool-use -d @- && exit 0 || (echo "Permission denied"; exit 2)'`,
 		hs.port,
 	)
 
-	settings := map[string]any{
-		"permissions": map[string]any{
-			"allow": []string{
-				"Bash",
-				"Read",
-				"Edit",
-				"Write",
-				"Glob",
-				"Grep",
-				"WebSearch",
-				"WebFetch",
-				"NotebookEdit",
-				"LSP",
-			},
-			"ask":  []string{},
-			"deny": []string{},
+	// 从用户 settings.json 读取关键配置（env、model 等）
+	settings := hs.loadUserSettings()
+
+	// 覆盖 permissions：全部允许，清空 deny
+	settings["permissions"] = map[string]any{
+		"allow": []string{
+			"Bash",
+			"Read",
+			"Edit",
+			"Write",
+			"Glob",
+			"Grep",
+			"WebSearch",
+			"WebFetch",
+			"NotebookEdit",
+			"LSP",
 		},
-		"hooks": map[string]any{
-			"PreToolUse": []map[string]any{
-				{
-					"matcher": "",
-					"hooks": []map[string]any{
-						{
-							"type":    "command",
-							"command": hookCommand,
-						},
+		"ask":  []string{},
+		"deny": []string{},
+	}
+
+	// 注入 PreToolUse Hook
+	settings["hooks"] = map[string]any{
+		"PreToolUse": []map[string]any{
+			{
+				"matcher": "",
+				"hooks": []map[string]any{
+					{
+						"type":    "command",
+						"command": hookCommand,
 					},
 				},
 			},
@@ -260,5 +265,58 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 		return "", fmt.Errorf("failed to write settings: %w", err)
 	}
 
+	log.Printf("Generated settings file: %s", tmpFile.Name())
 	return tmpFile.Name(), nil
+}
+
+// loadUserSettings 读取用户 ~/.claude/settings.json 中的关键配置
+// 保留 env（认证、API地址、模型）、model、language 等配置
+func (hs *HookServer) loadUserSettings() map[string]any {
+	result := make(map[string]any)
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Printf("Failed to get home dir: %v", err)
+		return result
+	}
+
+	settingsPath := homeDir + "/.claude/settings.json"
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		log.Printf("Failed to read user settings: %v", err)
+		return result
+	}
+
+	var userSettings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &userSettings); err != nil {
+		log.Printf("Failed to parse user settings: %v", err)
+		return result
+	}
+
+	// 保留关键配置项
+	preserveKeys := []string{
+		"env",        // API 认证、Base URL、模型配置
+		"model",      // 默认模型
+		"language",   // 语言设置
+		"apiProvider", // API 提供商
+	}
+
+	for _, key := range preserveKeys {
+		if raw, ok := userSettings[key]; ok {
+			var value any
+			if err := json.Unmarshal(raw, &value); err == nil {
+				result[key] = value
+			}
+		}
+	}
+
+	log.Printf("Loaded user settings keys: %v", func() []string {
+		keys := make([]string, 0, len(result))
+		for k := range result {
+			keys = append(keys, k)
+		}
+		return keys
+	}())
+
+	return result
 }
