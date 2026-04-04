@@ -1082,6 +1082,9 @@
         let chatHistory = []; // 持久化消息列表
         let currentPermissionRequest = null;
         let permissionCountdownInterval = null;
+        let currentSessionID = null;     // 当前 Claude 会话 ID
+        let historyBackup = null;        // 重连前的历史备份
+        let replayEventCount = 0;        // attached 后收到的回放事件数
 
         // === Chat History Persistence ===
         function saveHistory() {
@@ -1225,9 +1228,11 @@
                     currentToolCalls = {};
                     if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     document.getElementById('sendBtn').disabled = false;
-                    // 清空 DOM 和历史，由 Client 回放完整会话事件重建
+                    // 保存历史备份，用于 Client 重启后恢复
+                    historyBackup = chatHistory.length > 0 ? [...chatHistory] : null;
+                    replayEventCount = 0;
+                    // 清空 DOM，由 Client 回放事件重建；历史暂不清空
                     resetChatDOM();
-                    clearHistory();
                     break;
                 case 'detached':
                     attachedClient = null;
@@ -1238,6 +1243,7 @@
                     sendMessage({ type: 'list' });
                     break;
                 case 'chat_message':
+                    replayEventCount++;
                     handleChatMessage(msg.payload);
                     break;
                 case 'chat_ack':
@@ -1252,6 +1258,22 @@
                     currentStreamEl = null;
                     currentStreamText = '';
                     document.getElementById('sendBtn').disabled = false;
+                    // 记录 session_id
+                    const readySessionID = msg.payload?.session_id || null;
+                    // 如果没有回放事件且有历史备份，说明 Client 重启了
+                    if (replayEventCount === 0 && historyBackup && historyBackup.length > 0) {
+                        // session_id 相同说明恢复了同一个会话，还原历史
+                        if (!readySessionID || !currentSessionID || readySessionID === currentSessionID) {
+                            chatHistory = historyBackup;
+                            renderHistoryFromBackup();
+                        }
+                    }
+                    // 更新 session_id
+                    if (readySessionID) {
+                        currentSessionID = readySessionID;
+                    }
+                    historyBackup = null;
+                    replayEventCount = 0;
                     break;
                 case 'chat_error':
                     if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
@@ -1540,6 +1562,7 @@
 
         function newSession() {
             sendMessage({ type: 'new_session' });
+            currentSessionID = null;
             resetChat();
         }
 
@@ -1572,6 +1595,38 @@
             currentStreamText = '';
             currentToolCalls = {};
             if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
+        }
+
+        // renderHistoryFromBackup 从 chatHistory 重新渲染 DOM（Client 重启后恢复历史）
+        function renderHistoryFromBackup() {
+            const container = document.getElementById('messagesContainer');
+            const empty = document.getElementById('chatEmpty');
+            if (empty) empty.style.display = 'none';
+            for (const item of chatHistory) {
+                switch (item.type) {
+                    case 'user':
+                        container.appendChild(createMessageEl('user', item.text));
+                        messageCount++;
+                        break;
+                    case 'assistant':
+                        const el = createMessageEl('assistant', item.text);
+                        el.querySelector('.bubble').innerHTML = renderMarkdown(item.text);
+                        container.appendChild(el);
+                        messageCount++;
+                        break;
+                    case 'tool':
+                        const toolEl = createToolCard(item.toolId, item.toolName, item.toolInput);
+                        if (toolEl) {
+                            container.appendChild(toolEl);
+                            messageCount++;
+                        }
+                        break;
+                    case 'system':
+                        addSystemMessage(item.text, item.subtype);
+                        break;
+                }
+            }
+            scrollToBottom();
         }
 
         function sendChatMessage() {

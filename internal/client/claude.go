@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -69,11 +70,14 @@ func NewClaudeManager(config ClaudeConfig) *ClaudeManager {
 	if config.Path == "" {
 		config.Path = "claude"
 	}
-	return &ClaudeManager{
+	cm := &ClaudeManager{
 		config:  config,
 		events:  make(chan ClaudeEvent, 256),
 		running: false,
 	}
+	// 从文件恢复上次的 session_id
+	cm.loadSessionID()
+	return cm
 }
 
 // SetHookSettingsPath 设置 Hook 配置文件路径
@@ -95,6 +99,7 @@ func (cm *ClaudeManager) SetSessionID(id string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.sessionID = id
+	cm.saveSessionID()
 }
 
 // IsRunning 是否正在运行
@@ -239,6 +244,7 @@ func (cm *ClaudeManager) ResetSession() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.sessionID = ""
+	cm.saveSessionID()
 }
 
 func (cm *ClaudeManager) setRunning(r bool) {
@@ -254,6 +260,46 @@ func (cm *ClaudeManager) getWorkDir() string {
 		return "."
 	}
 	return dir
+}
+
+// sessionIDPath 返回 session_id 持久化文件路径
+func (cm *ClaudeManager) sessionIDPath() string {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, ".claude-forward", "session_id")
+}
+
+// saveSessionID 将 session_id 写入文件（调用方需持有 cm.mu）
+func (cm *ClaudeManager) saveSessionID() {
+	path := cm.sessionIDPath()
+	if path == "" {
+		return
+	}
+	os.MkdirAll(filepath.Dir(path), 0755)
+	if cm.sessionID == "" {
+		os.Remove(path)
+	} else {
+		os.WriteFile(path, []byte(cm.sessionID), 0644)
+	}
+}
+
+// loadSessionID 从文件恢复 session_id
+func (cm *ClaudeManager) loadSessionID() {
+	path := cm.sessionIDPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	id := strings.TrimSpace(string(data))
+	if id != "" {
+		cm.sessionID = id
+		log.Printf("Restored session_id from file: %s", id)
+	}
 }
 
 // parseJSONLLine 解析单行 JSONL 为 ClaudeEvent(s)
