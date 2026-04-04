@@ -841,36 +841,28 @@
             box-shadow: none;
         }
 
-        /* === Reconnect Overlay === */
-        .reconnect-overlay {
-            position: absolute;
-            inset: 0;
-            background: rgba(245, 240, 232, 0.85);
-            backdrop-filter: blur(4px);
+        /* === Reconnect Banner === */
+        .reconnect-banner {
             display: none;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-sunken);
+            border-bottom: 1px solid var(--border-default);
+            font-size: 13px;
+            color: var(--text-secondary);
             z-index: 5;
         }
 
-        .reconnect-overlay.active { display: flex; }
+        .reconnect-banner.active { display: flex; }
 
-        .reconnect-spinner {
-            width: 32px;
-            height: 32px;
-            border: 2.5px solid var(--border-default);
-            border-top-color: var(--accent-primary);
+        .reconnect-banner-dot {
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-bottom: 12px;
-        }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .reconnect-overlay p {
-            font-size: 14px;
-            color: var(--text-secondary);
+            background: var(--status-connecting);
+            animation: pulse 1.5s ease-in-out infinite;
         }
 
         /* === Permission Dialog === */
@@ -1046,9 +1038,9 @@
                 <p>发送消息，Claude 将为你远程编程</p>
             </div>
         </div>
-        <div class="reconnect-overlay" id="reconnectOverlay">
-            <div class="reconnect-spinner"></div>
-            <p>重新连接中...</p>
+        <div class="reconnect-banner" id="reconnectBanner">
+            <span class="reconnect-banner-dot"></span>
+            <span>连接中断，正在恢复...</span>
         </div>
         <div class="permission-overlay" id="permissionOverlay">
             <div class="permission-dialog">
@@ -1073,6 +1065,7 @@
         let ws = null;
         let attachedClient = null;
         let isReconnecting = false;
+        let reconnectTimer = null;
         let isStreaming = false;
         let currentStreamEl = null;
         let currentStreamText = '';
@@ -1159,6 +1152,48 @@
         }
 
         // === Connection ===
+        function forceReconnect(reason) {
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            isReconnecting = false;
+            if (ws) {
+                isReconnecting = true;
+                ws.onclose = null;
+                ws.onerror = null;
+                try { ws.close(); } catch(e) {}
+                ws = null;
+            }
+            showDebug('强制重连: ' + reason);
+            isReconnecting = true;
+            updateStatus('', '重新连接中...');
+            connect();
+        }
+
+        function setupVisibilityHandling() {
+            let wentBackgroundAt = 0;
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    if (!attachedClient) return;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        try { ws.send(''); } catch(e) { forceReconnect('前台检测到死连接'); }
+                        return;
+                    }
+                    const bgSec = wentBackgroundAt ? Math.round((Date.now() - wentBackgroundAt) / 1000) : '?';
+                    showDebug('页面恢复可见，立即重连 (后台 ' + bgSec + 's)');
+                    forceReconnect('页面恢复可见');
+                } else {
+                    wentBackgroundAt = Date.now();
+                }
+            });
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted && attachedClient) {
+                    showDebug('页面从 bfcache 恢复，检查连接');
+                    if (!ws || ws.readyState !== WebSocket.OPEN) {
+                        forceReconnect('bfcache 恢复');
+                    }
+                }
+            });
+        }
+
         function connect() {
             const serverUrl = document.getElementById('serverUrl').value;
             const token = document.getElementById('token').value;
@@ -1176,6 +1211,8 @@
             ws.onopen = () => {
                 showDebug('WebSocket 已连接');
                 updateStatus('connected', '已连接');
+                // 清除可能存在的重连计时器
+                if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
                 const savedClient = localStorage.getItem('cf_attached_client');
                 if (savedClient) {
@@ -1200,8 +1237,11 @@
                     localStorage.setItem('cf_attached_client', attachedClient);
                     isReconnecting = true;
                     showReconnect();
-                    showDebug('保存 attach 状态，3s 后重连');
-                    setTimeout(() => { if (isReconnecting) connect(); }, 3000);
+                    showDebug('连接断开，3s 后重连');
+                    reconnectTimer = setTimeout(() => {
+                        reconnectTimer = null;
+                        if (isReconnecting) connect();
+                    }, 3000);
                 }
             };
 
@@ -1539,13 +1579,13 @@
         }
 
         function showReconnect() {
-            const overlay = document.getElementById('reconnectOverlay');
-            if (overlay) overlay.classList.add('active');
+            const banner = document.getElementById('reconnectBanner');
+            if (banner) banner.classList.add('active');
         }
 
         function hideReconnect() {
-            const overlay = document.getElementById('reconnectOverlay');
-            if (overlay) overlay.classList.remove('active');
+            const banner = document.getElementById('reconnectBanner');
+            if (banner) banner.classList.remove('active');
         }
 
         // === Actions ===
@@ -1762,6 +1802,7 @@
         // === Start ===
         init();
         loadBuildInfo();
+        setupVisibilityHandling();
     </script>
 </body>
 </html>
