@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -116,6 +117,9 @@ func (c *Client) Run() {
 
 	// 初始化 Claude 管理器
 	c.claude = NewClaudeManager(c.config.Claude)
+
+	// 从磁盘恢复会话事件
+	c.loadSessionEvents()
 
 	// 初始化权限系统
 	if err := c.initPermissionSystem(); err != nil {
@@ -355,6 +359,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		})
 		c.sessionMu.Lock()
 		c.sessionEvents = append(c.sessionEvents, *userMsg)
+		c.saveSessionEvents()
 		c.sessionMu.Unlock()
 		go c.handleChatInput(msg.From, payload.Text)
 
@@ -365,6 +370,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.sessionMu.Lock()
 		c.sessionEvents = nil
 		c.sentUpTo = 0
+		c.saveSessionEvents()
 		c.sessionMu.Unlock()
 
 	case protocol.TypePermissionResponse:
@@ -506,6 +512,10 @@ func (c *Client) handleChatInput(userID string, text string) {
 		if shouldSend && uid != "" {
 			c.sentUpTo = len(c.sessionEvents)
 		}
+		// 持久化事件到磁盘（result 事件时保存，避免频繁 IO）
+		if event.Type == EventResult {
+			c.saveSessionEvents()
+		}
 		c.sessionMu.Unlock()
 
 		if uid != "" && shouldSend {
@@ -566,4 +576,51 @@ func (c *Client) setUser(userID string) {
 	c.userMu.Lock()
 	defer c.userMu.Unlock()
 	c.attachedUser = userID
+}
+
+// sessionEventsPath 返回 sessionEvents 持久化文件路径
+func (c *Client) sessionEventsPath() string {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, ".claude-forward", "session_events.json")
+}
+
+// saveSessionEvents 将 sessionEvents 持久化到磁盘（调用方需持有 c.sessionMu）
+func (c *Client) saveSessionEvents() {
+	path := c.sessionEventsPath()
+	if path == "" {
+		return
+	}
+	data, err := json.Marshal(c.sessionEvents)
+	if err != nil {
+		log.Printf("Failed to marshal session events: %v", err)
+		return
+	}
+	os.MkdirAll(filepath.Dir(path), 0755)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		log.Printf("Failed to save session events: %v", err)
+	}
+}
+
+// loadSessionEvents 从磁盘恢复 sessionEvents
+func (c *Client) loadSessionEvents() {
+	path := c.sessionEventsPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var events []protocol.Message
+	if err := json.Unmarshal(data, &events); err != nil {
+		log.Printf("Failed to unmarshal session events: %v", err)
+		return
+	}
+	if len(events) > 0 {
+		c.sessionEvents = events
+		log.Printf("Restored %d session events from file", len(events))
+	}
 }
