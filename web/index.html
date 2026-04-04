@@ -1218,6 +1218,15 @@
                     localStorage.setItem('cf_attached_client', attachedClient);
                     showView('chatView');
                     document.getElementById('headerActions').style.display = 'flex';
+                    // 重置所有流式状态，避免断线重连后 isStreaming 卡在 true
+                    isStreaming = false;
+                    currentStreamEl = null;
+                    currentStreamText = '';
+                    currentToolCalls = {};
+                    if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
+                    document.getElementById('sendBtn').disabled = false;
+                    // 清空 DOM 后恢复历史，避免重复追加
+                    resetChatDOM();
                     loadHistory();
                     restoreChatFromHistory();
                     break;
@@ -1528,6 +1537,21 @@
             currentToolCalls = {};
             isStreaming = false;
             document.getElementById('sendBtn').disabled = false;
+        }
+
+        // resetChatDOM 只清空 DOM 容器，不清除 chatHistory（用于断线重连后恢复）
+        function resetChatDOM() {
+            document.getElementById('messagesContainer').innerHTML = `
+                <div class="chat-welcome" id="chatEmpty">
+                    <div class="welcome-icon">&#9997;&#65039;</div>
+                    <h2>开始对话</h2>
+                    <p>发送消息，Claude 将为你远程编程</p>
+                </div>`;
+            messageCount = 0;
+            currentStreamEl = null;
+            currentStreamText = '';
+            currentToolCalls = {};
+            if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
         }
 
         function sendChatMessage() {

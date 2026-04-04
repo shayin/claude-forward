@@ -267,6 +267,19 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		// 启动转发
 		go c.startForwarding(msg.From)
 
+		// 报告 Claude 当前状态：如果 Claude 已完成且 handleChatInput 已退出，
+		// 需要兜底发送 chat_ready 以解除 UI 阻塞
+		if !c.claude.IsRunning() {
+			readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+				SessionID: c.claude.SessionID(),
+			})
+			readyMsg.To = msg.From
+			c.send <- readyMsg
+			log.Printf("Sent chat_ready to reattached user (Claude idle)")
+		} else {
+			log.Printf("Claude still running, events will resume via buffer replay")
+		}
+
 	case protocol.TypeDetach:
 		log.Printf("User detached: %s", msg.From)
 		c.setUser("")
@@ -343,6 +356,12 @@ func (c *Client) startForwarding(userID string) {
 	c.forwardCancel = cancel
 	c.forwardMu.Unlock()
 
+	currentUserID := func() string {
+		c.userMu.RLock()
+		defer c.userMu.RUnlock()
+		return c.attachedUser
+	}
+
 	buf := make([]byte, 4096)
 
 	for {
@@ -362,8 +381,10 @@ func (c *Client) startForwarding(userID string) {
 			msg, _ := protocol.NewMessage(protocol.TypeOutput, protocol.OutputPayload{
 				Data: string(buf[:n]),
 			})
-			msg.To = userID
-			c.send <- msg
+			msg.To = currentUserID()
+			if msg.To != "" {
+				c.send <- msg
+			}
 		}
 	}
 }
@@ -381,9 +402,16 @@ func (c *Client) stopForwarding() {
 
 // handleChatInput 处理聊天输入，启动 Claude 并流式转发结果
 func (c *Client) handleChatInput(userID string, text string) {
+	// 动态获取当前连接的用户 ID（支持断线重连后切换）
+	currentUserID := func() string {
+		c.userMu.RLock()
+		defer c.userMu.RUnlock()
+		return c.attachedUser
+	}
+
 	// 立即发送确认，让 UI 知道消息已被接收
 	ackMsg, _ := protocol.NewMessage(protocol.TypeChatAck, nil)
-	ackMsg.To = userID
+	ackMsg.To = currentUserID()
 	c.send <- ackMsg
 
 	if c.claude.IsRunning() {
@@ -391,7 +419,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 			Code:    409,
 			Message: "Claude is still processing, please wait",
 		})
-		errMsg.To = userID
+		errMsg.To = currentUserID()
 		c.send <- errMsg
 		return
 	}
@@ -401,12 +429,14 @@ func (c *Client) handleChatInput(userID string, text string) {
 			Code:    500,
 			Message: fmt.Sprintf("Failed to start Claude: %v", err),
 		})
-		errMsg.To = userID
+		errMsg.To = currentUserID()
 		c.send <- errMsg
 		return
 	}
 
-	// 流式转发事件到用户
+	// 流式转发事件到用户，支持断线重连后的缓冲和回放
+	var pendingBuffer []protocol.Message
+
 	for event := range c.claude.Stream() {
 		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 			EventType:  string(event.Type),
@@ -419,16 +449,36 @@ func (c *Client) handleChatInput(userID string, text string) {
 			IsPartial:  event.IsPartial,
 			SessionID:  event.SessionID,
 		})
-		msg.To = userID
-		c.send <- msg
+		uid := currentUserID()
+
+		if uid == "" {
+			// 无用户连接，缓冲事件
+			pendingBuffer = append(pendingBuffer, *msg)
+		} else {
+			// 有用户，先回放缓冲的事件
+			if len(pendingBuffer) > 0 {
+				for i := range pendingBuffer {
+					pendingBuffer[i].To = uid
+					c.send <- &pendingBuffer[i]
+				}
+				pendingBuffer = nil
+			}
+			msg.To = uid
+			c.send <- msg
+		}
 
 		// result 事件表示轮次结束
 		if event.Type == EventResult {
 			readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
 				SessionID: c.claude.SessionID(),
 			})
-			readyMsg.To = userID
-			c.send <- readyMsg
+			uid := currentUserID()
+			if uid == "" {
+				pendingBuffer = append(pendingBuffer, *readyMsg)
+			} else {
+				readyMsg.To = uid
+				c.send <- readyMsg
+			}
 		}
 	}
 }

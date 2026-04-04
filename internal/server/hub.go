@@ -86,7 +86,16 @@ func (h *Hub) Run() {
 				}
 			} else {
 				delete(h.users, conn.ID)
-				delete(h.attachMap, conn.ID)
+				if clientID, ok := h.attachMap[conn.ID]; ok {
+					delete(h.attachMap, conn.ID)
+					// 通知 Client 该用户已断开
+					if client, ok := h.clients[clientID]; ok {
+						client.Send <- &protocol.Message{
+							Type: protocol.TypeDetach,
+							From: conn.ID,
+						}
+					}
+				}
 			}
 			h.mu.Unlock()
 			close(conn.Send)
