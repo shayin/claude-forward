@@ -1280,6 +1280,14 @@
             if (empty) empty.style.display = 'none';
 
             switch (payload.event_type) {
+                case 'user_message':
+                    // 回放用户消息（断线重连后由 Client 回放）
+                    const userEl = createMessageEl('user', payload.text);
+                    container.appendChild(userEl);
+                    messageCount++;
+                    scrollToBottom();
+                    break;
+
                 case 'stream_delta':
                     // 收到实际输出，移除本地占位气泡
                     if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }

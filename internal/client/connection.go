@@ -271,7 +271,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		go c.startForwarding(msg.From)
 
 		// === 会话事件回放 ===
-		// 1. 先复制当前所有事件快照，标记为已发送
+		// 1. 先复制当前所有事件快照
 		c.sessionMu.Lock()
 		events := make([]protocol.Message, len(c.sessionEvents))
 		copy(events, c.sessionEvents)
@@ -279,24 +279,24 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.sentUpTo = snapshotLen
 		c.sessionMu.Unlock()
 
-		// 2. 回放快照事件（此时 setUser 还没调用，goroutine 不会干扰）
+		// 2. 回放快照事件（此时 setUser 还没调用，goroutine 不会发送）
 		for i := range events {
 			events[i].To = msg.From
 			c.send <- &events[i]
 		}
 
-		// 3. 设置用户 ID（之后 goroutine 可以发送新事件）
-		c.setUser(msg.From)
-
-		// 4. 发送回放期间新增的事件（goroutine 可能在这期间追加了事件但没有发送）
+		// 3. 发送快照期间新增的事件（必须在 setUser 之前，避免竞态）
 		c.sessionMu.Lock()
-		for i := c.sentUpTo; i < len(c.sessionEvents); i++ {
+		for i := snapshotLen; i < len(c.sessionEvents); i++ {
 			remaining := c.sessionEvents[i]
 			remaining.To = msg.From
 			c.send <- &remaining
 		}
 		c.sentUpTo = len(c.sessionEvents)
 		c.sessionMu.Unlock()
+
+		// 4. 设置用户 ID（在所有回放事件发送之后，此后 goroutine 可以发送新事件）
+		c.setUser(msg.From)
 
 		// 5. 如果 Claude 已完成，发送 chat_ready
 		if !c.claude.IsRunning() {
@@ -348,6 +348,14 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if err := msg.ParsePayload(&payload); err != nil {
 			return
 		}
+		// 将用户消息存入 sessionEvents，支持断线重连后完整回放
+		userMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
+			EventType: "user_message",
+			Text:      payload.Text,
+		})
+		c.sessionMu.Lock()
+		c.sessionEvents = append(c.sessionEvents, *userMsg)
+		c.sessionMu.Unlock()
 		go c.handleChatInput(msg.From, payload.Text)
 
 	case protocol.TypeNewSession:
@@ -484,16 +492,17 @@ func (c *Client) handleChatInput(userID string, text string) {
 		})
 
 		// 追加到会话事件缓冲，并判断是否应该发送给用户
+		// 只有实际发送时才更新 sentUpTo，避免用户离线时标记为已发送导致回放跳过
+		uid := currentUserID()
 		c.sessionMu.Lock()
 		c.sessionEvents = append(c.sessionEvents, *msg)
 		myIndex := len(c.sessionEvents) - 1
 		shouldSend := myIndex >= c.sentUpTo
-		if shouldSend {
+		if shouldSend && uid != "" {
 			c.sentUpTo = len(c.sessionEvents)
 		}
 		c.sessionMu.Unlock()
 
-		uid := currentUserID()
 		if uid != "" && shouldSend {
 			msg.To = uid
 			c.send <- msg
