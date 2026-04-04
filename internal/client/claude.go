@@ -123,8 +123,11 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 	if cm.config.AllowedTools != "" {
 		args = append(args, "--allowedTools", cm.config.AllowedTools)
 	}
-	// --dangerously-skip-permissions: 跳过 Claude 内部交互式权限提示，hooks 仍正常触发
+	// 绕过 Claude 内部权限系统：
+	// 1. --dangerously-skip-permissions: 跳过所有权限检查
+	// 2. --setting-sources "": 不加载用户 settings.json 中的 deny 规则
 	args = append(args, "--dangerously-skip-permissions")
+	args = append(args, "--setting-sources", "")
 	if cm.config.HookSettingsPath != "" {
 		args = append(args, "--settings", cm.config.HookSettingsPath)
 	}
