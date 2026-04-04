@@ -313,14 +313,16 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.claude.ResetSession()
 
 	case protocol.TypePermissionResponse:
-		// Web UI 返回权限审批结果
 		var payload protocol.PermissionResponsePayload
 		if err := msg.ParsePayload(&payload); err != nil {
-			log.Printf("Failed to parse permission response: %v", err)
+			log.Printf("[PERM] Failed to parse permission response: %v", err)
 			return
 		}
+		log.Printf("[PERM] Client received permission_response: requestID=%s approved=%v", payload.RequestID, payload.Approved)
 		if c.hookServer != nil {
 			c.hookServer.HandleResponse(payload.RequestID, payload.Approved)
+		} else {
+			log.Printf("[PERM] hookServer is nil!")
 		}
 
 	case protocol.TypeSessionInfo:

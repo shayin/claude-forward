@@ -86,8 +86,11 @@ func (hs *HookServer) SettingsPath() string {
 func (hs *HookServer) HandleResponse(requestID string, approved bool) {
 	hs.mu.Lock()
 	if ch, ok := hs.pending[requestID]; ok {
+		log.Printf("[PERM] HandleResponse: found pending request %s, approved=%v", requestID, approved)
 		ch <- approved
 		delete(hs.pending, requestID)
+	} else {
+		log.Printf("[PERM] HandleResponse: requestID %s NOT FOUND in pending map (pending count=%d)", requestID, len(hs.pending))
 	}
 	hs.mu.Unlock()
 }
@@ -183,9 +186,12 @@ func (hs *HookServer) handleAskPermission(w http.ResponseWriter, toolName string
 
 	hs.sendToUI(msg)
 
+	log.Printf("[PERM] Waiting for response to request %s (timeout=%v)", requestID, hs.timeout)
+
 	// 等待用户响应或超时
 	select {
 	case approved := <-responseCh:
+		log.Printf("[PERM] Received response for request %s: approved=%v", requestID, approved)
 		if approved {
 			w.WriteHeader(http.StatusOK)
 		} else {
@@ -195,7 +201,7 @@ func (hs *HookServer) handleAskPermission(w http.ResponseWriter, toolName string
 	case <-time.After(hs.timeout):
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, "Permission request timed out")
-		log.Printf("Permission request %s timed out for tool %s", requestID, toolName)
+		log.Printf("[PERM] Request %s TIMED OUT for tool %s (pending count=%d)", requestID, toolName, len(hs.pending))
 	}
 }
 

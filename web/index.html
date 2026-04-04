@@ -1640,6 +1640,7 @@
 
         function respondPermission(approved) {
             if (!currentPermissionRequest) return;
+            showDebug('发送审批结果: request_id=' + currentPermissionRequest + ' approved=' + approved + ' wsState=' + (ws ? ws.readyState : 'null'));
             sendMessage({
                 type: 'permission_response',
                 payload: {

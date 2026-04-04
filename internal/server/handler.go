@@ -170,6 +170,7 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 
 	case protocol.TypePermissionResponse:
 		// 权限审批结果：从 user 转发到 client
+		log.Printf("[PERM] Server received permission_response from user %s", conn.ID)
 		h.handleChatUserToClient(conn, msg)
 
 	case protocol.TypePong:
@@ -378,10 +379,12 @@ func (h *Handler) handleKillSession(conn *Connection) {
 func (h *Handler) handleChatUserToClient(conn *Connection, msg *protocol.Message) {
 	client, ok := h.hub.GetAttachedClient(conn.ID)
 	if !ok {
+		log.Printf("[PERM] handleChatUserToClient: no attached client for user %s", conn.ID)
 		return
 	}
 	msg.From = conn.ID
 	client.Send <- msg
+	log.Printf("[PERM] Server forwarded message to client %s", client.ID)
 }
 
 // handleChatClientToUser 转发聊天消息从客户端到用户
