@@ -1387,17 +1387,17 @@
                     const usageParts = [];
                     const fmt = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n;
                     if (payload.cost_usd > 0) {
-                        usageParts.push(`费用: $${payload.cost_usd.toFixed(4)}`);
+                        usageParts.push(`$${payload.cost_usd.toFixed(4)}`);
                     }
                     const outputTokens = payload.output_tokens || 0;
                     if (outputTokens > 0) {
-                        usageParts.push(`本轮: ${fmt(outputTokens)}`);
+                        usageParts.push(`${fmt(outputTokens)} out`);
                     }
                     const totalInput = (payload.input_tokens || 0) + (payload.cache_creation_input_tokens || 0) + (payload.cache_read_input_tokens || 0);
                     if (totalInput > 0) {
                         const ctxWin = payload.context_window || 200000;
                         const pct = ((totalInput / ctxWin) * 100).toFixed(1);
-                        usageParts.push(`上下文: ${fmt(totalInput)} / ${fmt(ctxWin)} (${pct}%)`);
+                        usageParts.push(`${fmt(totalInput)}/${fmt(ctxWin)} ${pct}%`);
                     }
                     if (usageParts.length > 0) {
                         const usageText = usageParts.join(' | ');
