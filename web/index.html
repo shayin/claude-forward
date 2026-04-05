@@ -1644,12 +1644,12 @@
 
         function detach() {
             sendMessage({ type: 'detach' });
+            resetChat(); // 先清空历史（依赖 attachedClient 定位 localStorage key）
             attachedClient = null;
             isReconnecting = false;
             localStorage.removeItem('cf_attached_client');
             document.getElementById('headerActions').style.display = 'none';
             hideReconnect();
-            resetChat();
         }
 
         function newSession() {
