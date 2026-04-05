@@ -1195,6 +1195,17 @@
         }
 
         function connect() {
+            // 清理旧连接，避免重复点击创建多个 WebSocket
+            if (ws) {
+                ws.onclose = null;
+                ws.onerror = null;
+                ws.onmessage = null;
+                try { ws.close(); } catch(e) {}
+                ws = null;
+            }
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            isReconnecting = false;
+
             const serverUrl = document.getElementById('serverUrl').value;
             const token = document.getElementById('token').value;
             if (!serverUrl || !token) { alert('请填写服务器地址和 Token'); return; }
@@ -1242,11 +1253,16 @@
                         reconnectTimer = null;
                         if (isReconnecting) connect();
                     }, 3000);
+                } else {
+                    showConnectionError('连接已断开，请检查服务器地址后重试');
                 }
             };
 
             ws.onerror = () => {
                 updateStatus('', '连接错误');
+                if (!attachedClient) {
+                    showConnectionError('无法连接到服务器，请检查地址和网络');
+                }
             };
         }
 
@@ -1328,7 +1344,10 @@
                 case 'error':
                     if (msg.payload?.message?.includes('not found')) {
                         localStorage.removeItem('cf_attached_client');
+                        attachedClient = null;
                         isReconnecting = false;
+                        // attach 失败（客户端已断开），回退到客户端列表
+                        sendMessage({ type: 'list' });
                     }
                     addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
                     break;
@@ -1588,6 +1607,22 @@
         function hideReconnect() {
             const banner = document.getElementById('reconnectBanner');
             if (banner) banner.classList.remove('active');
+        }
+
+        // === Connection Error ===
+        function showConnectionError(text) {
+            // 移除旧错误提示
+            const old = document.getElementById('connError');
+            if (old) old.remove();
+            // 在连接按钮下方插入错误提示
+            const btn = document.getElementById('connectBtn');
+            const errDiv = document.createElement('div');
+            errDiv.id = 'connError';
+            errDiv.style.cssText = 'color:var(--status-error);font-size:13px;text-align:center;margin-top:8px;';
+            errDiv.textContent = text;
+            btn.parentNode.insertBefore(errDiv, btn.nextSibling);
+            // 5 秒后自动消失
+            setTimeout(() => { if (errDiv.parentNode) errDiv.remove(); }, 5000);
         }
 
         // === Actions ===
