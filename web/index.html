@@ -1013,6 +1013,7 @@
                 <input type="password" id="token" placeholder="your-secret-token">
             </div>
             <button class="btn-primary" id="connectBtn" onclick="connect()">连接</button>
+            <button class="debug-toggle" onclick="clearAllLocalData()">清除本地记录</button>
             <button class="debug-toggle" onclick="toggleDebug()">显示日志</button>
             <div id="debugPanel">
                 <div id="debugLog"></div>
@@ -1093,6 +1094,16 @@
                 const data = localStorage.getItem('cf_history_' + attachedClient);
                 if (data) chatHistory = JSON.parse(data);
             } catch(e) { chatHistory = []; }
+        }
+
+        function clearAllLocalData() {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('cf_')) keys.push(key);
+            }
+            keys.forEach(k => localStorage.removeItem(k));
+            alert('已清除 ' + keys.length + ' 条本地记录');
         }
 
         function clearHistory() {
