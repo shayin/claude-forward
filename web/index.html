@@ -1268,11 +1268,13 @@
                     currentToolCalls = {};
                     if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     document.getElementById('sendBtn').disabled = false;
-                    // 保存历史备份，用于 Client 重启后恢复
-                    historyBackup = chatHistory.length > 0 ? [...chatHistory] : null;
                     replayEventCount = 0;
-                    // 清空 DOM，由 Client 回放事件重建；历史暂不清空
+                    // 清空 DOM，加载新客户端的历史记录
                     resetChatDOM();
+                    chatHistory = [];
+                    loadHistory();
+                    restoreChatFromHistory();
+                    historyBackup = chatHistory.length > 0 ? [...chatHistory] : null;
                     break;
                 case 'detached':
                     attachedClient = null;
