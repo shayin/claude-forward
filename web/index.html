@@ -1012,6 +1012,10 @@
                 <label>Token</label>
                 <input type="password" id="token" placeholder="your-secret-token">
             </div>
+            <div class="form-group">
+                <label>加密密钥</label>
+                <input type="password" id="encryptionKey" placeholder="留空则不加密">
+            </div>
             <button class="btn-primary" id="connectBtn" onclick="connect()">连接</button>
             <button class="debug-toggle" onclick="toggleDebug()">显示日志</button>
             <div id="debugPanel">
@@ -1061,6 +1065,48 @@
     </div>
 
     <script>
+        // === E2EE Module ===
+        const E2EE = (() => {
+            let aesKey = null;
+            const PREFIX = 'claude-forward-e2ee-v1:';
+
+            async function init(encryptionKey) {
+                if (!encryptionKey) { aesKey = null; return; }
+                const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(PREFIX + encryptionKey));
+                aesKey = await crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+            }
+
+            function isEnabled() { return aesKey !== null; }
+
+            async function encryptPayload(plaintext) {
+                if (!aesKey) return plaintext;
+                const encoded = new TextEncoder().encode(plaintext);
+                const nonce = crypto.getRandomValues(new Uint8Array(12));
+                const sealed = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, aesKey, encoded);
+                const combined = new Uint8Array(nonce.length + sealed.byteLength);
+                combined.set(nonce, 0);
+                combined.set(new Uint8Array(sealed), nonce.length);
+                return btoa(String.fromCharCode(...combined));
+            }
+
+            async function decryptPayload(base64Str) {
+                if (!aesKey) return base64Str;
+                const combined = Uint8Array.from(atob(base64Str), c => c.charCodeAt(0));
+                const nonce = combined.slice(0, 12);
+                const ciphertext = combined.slice(12);
+                const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, aesKey, ciphertext);
+                return new TextDecoder().decode(plaintext);
+            }
+
+            return { init, isEnabled, encryptPayload, decryptPayload };
+        })();
+
+        function isEncryptableType(type) {
+            return ['chat_input', 'chat_message', 'chat_ready', 'chat_error',
+                    'chat_ack', 'permission_request', 'permission_response',
+                    'session_info', 'new_session', 'kill_session'].includes(type);
+        }
+
         // === State ===
         let ws = null;
         let attachedClient = null;
@@ -1134,8 +1180,10 @@
             const params = new URLSearchParams(window.location.search);
             const server = params.get('server') || localStorage.getItem('cf_server') || '';
             const token = params.get('token') || localStorage.getItem('cf_token') || '';
+            const ek = params.get('encryption_key') || localStorage.getItem('cf_encryption_key') || '';
             if (server) document.getElementById('serverUrl').value = server;
             if (token) document.getElementById('token').value = token;
+            if (ek) document.getElementById('encryptionKey').value = ek;
 
             // Auto-resize textarea
             const textarea = document.getElementById('chatInput');
@@ -1194,13 +1242,20 @@
             });
         }
 
-        function connect() {
+        async function connect() {
             const serverUrl = document.getElementById('serverUrl').value;
             const token = document.getElementById('token').value;
+            const encryptionKey = document.getElementById('encryptionKey').value;
             if (!serverUrl || !token) { alert('请填写服务器地址和 Token'); return; }
 
             localStorage.setItem('cf_server', serverUrl);
             localStorage.setItem('cf_token', token);
+            localStorage.setItem('cf_encryption_key', encryptionKey || '');
+
+            // 初始化 E2EE
+            await E2EE.init(encryptionKey);
+            if (E2EE.isEnabled()) showDebug('E2EE 已启用');
+
             updateStatus('connecting', '连接中...');
 
             const wsUrl = `${serverUrl}/ws?token=${token}`;
@@ -1226,8 +1281,19 @@
                 }
             };
 
-            ws.onmessage = (event) => {
+            ws.onmessage = async (event) => {
                 const msg = JSON.parse(event.data);
+                // 解密敏感消息 payload
+                if (E2EE.isEnabled() && msg.payload && isEncryptableType(msg.type)) {
+                    try {
+                        const plaintext = await E2EE.decryptPayload(msg.payload);
+                        msg.payload = JSON.parse(plaintext);
+                    } catch(e) {
+                        console.error('E2EE decrypt error:', e);
+                        showDebug('E2EE 解密失败: ' + e.message);
+                        return;
+                    }
+                }
                 handleMessage(msg);
             };
 
@@ -1709,8 +1775,18 @@
             }
         }
 
-        function sendMessage(msg) {
+        async function sendMessage(msg) {
             if (ws && ws.readyState === WebSocket.OPEN) {
+                // 加密敏感消息 payload
+                if (E2EE.isEnabled() && msg.payload && isEncryptableType(msg.type)) {
+                    try {
+                        const plaintext = JSON.stringify(msg.payload);
+                        msg.payload = await E2EE.encryptPayload(plaintext);
+                    } catch(e) {
+                        console.error('E2EE encrypt error:', e);
+                        return;
+                    }
+                }
                 ws.send(JSON.stringify(msg));
             }
         }

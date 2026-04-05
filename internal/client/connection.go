@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shayin/claude-forward/internal/crypto"
 	"github.com/shayin/claude-forward/internal/protocol"
 )
 
@@ -31,22 +32,30 @@ type Client struct {
 	forwardCancel context.CancelFunc // 用于停止 forwarding goroutine
 	forwardMu     sync.Mutex
 	connClosed    int32 // 连接是否已关闭的标志（用于防止重复关闭）
+	e2ee          *crypto.E2EE
 
 	// 会话级别事件缓冲：存储当前 Claude 会话的所有事件
 	// 在 handleChatInput goroutine 退出后仍保留，支持断线重连后完整回放
 	sessionEvents []protocol.Message
-	sentUpTo      int         // 已发送到用户的事件索引（用于去重）
-	sessionMu     sync.Mutex  // 保护 sessionEvents 和 sentUpTo
+	sentUpTo      int        // 已发送到用户的事件索引（用于去重）
+	sessionMu     sync.Mutex // 保护 sessionEvents 和 sentUpTo
 }
 
 // NewClient 创建客户端
 func NewClient(config *Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	e2ee, err := crypto.NewE2EE(config.Server.EncryptionKey)
+	if err != nil {
+		log.Fatalf("Failed to initialize E2EE: %v", err)
+	}
+
 	return &Client{
 		config: config,
 		send:   make(chan *protocol.Message, 256),
 		ctx:    ctx,
 		cancel: cancel,
+		e2ee:   e2ee,
 	}
 }
 
@@ -178,6 +187,16 @@ func (c *Client) readPump() {
 			continue
 		}
 
+		// 解密敏感消息 payload
+		if c.e2ee.Enabled() && isEncryptableType(msg.Type) {
+			decrypted, err := c.e2ee.DecryptPayload(msg.Payload)
+			if err != nil {
+				log.Printf("E2EE decrypt error: %v", err)
+				continue
+			}
+			msg.Payload = decrypted
+		}
+
 		c.handleMessage(&msg)
 	}
 }
@@ -211,6 +230,16 @@ func (c *Client) writePump() {
 
 			if conn == nil || atomic.LoadInt32(&c.connClosed) == 1 {
 				return
+			}
+
+			// 加密敏感消息 payload
+			if c.e2ee.Enabled() && isEncryptableType(msg.Type) {
+				encrypted, err := c.e2ee.EncryptPayload(msg.Payload)
+				if err != nil {
+					log.Printf("E2EE encrypt error: %v", err)
+					continue
+				}
+				msg.Payload = encrypted
 			}
 
 			data, err := json.Marshal(msg)
@@ -622,5 +651,24 @@ func (c *Client) loadSessionEvents() {
 	if len(events) > 0 {
 		c.sessionEvents = events
 		log.Printf("Restored %d session events from file", len(events))
+	}
+}
+
+// isEncryptableType 判断消息类型是否需要 E2EE 加密
+func isEncryptableType(t protocol.MessageType) bool {
+	switch t {
+	case protocol.TypeChatInput,
+		protocol.TypeChatMessage,
+		protocol.TypeChatReady,
+		protocol.TypeChatError,
+		protocol.TypeChatAck,
+		protocol.TypePermissionRequest,
+		protocol.TypePermissionResponse,
+		protocol.TypeSessionInfo,
+		protocol.TypeNewSession,
+		protocol.TypeKillSession:
+		return true
+	default:
+		return false
 	}
 }
