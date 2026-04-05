@@ -254,6 +254,17 @@ func (h *Handler) handleAttach(conn *Connection, msg *protocol.Message) {
 	// 设置连接类型
 	conn.Type = ConnTypeUser
 
+	// 如果用户之前附加在其他客户端，先通知旧客户端 detach
+	if oldClientID, ok := h.hub.GetAttachedClientID(conn.ID); ok && oldClientID != payload.ClientID {
+		if oldClient, ok := h.hub.GetClient(oldClientID); ok {
+			oldClient.Send <- &protocol.Message{
+				Type: protocol.TypeDetach,
+				From: conn.ID,
+			}
+			log.Printf("User %s switched from client %s to %s, notified old client", conn.ID, oldClientID, payload.ClientID)
+		}
+	}
+
 	// 附加到客户端
 	if !h.hub.AttachUser(conn.ID, payload.ClientID) {
 		conn.Send <- &protocol.Message{

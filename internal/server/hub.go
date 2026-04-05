@@ -173,6 +173,14 @@ func (h *Hub) DetachUser(userID string) {
 	}
 }
 
+// GetAttachedClientID 获取用户附加的客户端ID（不返回连接对象）
+func (h *Hub) GetAttachedClientID(userID string) (string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	clientID, ok := h.attachMap[userID]
+	return clientID, ok
+}
+
 // GetAttachedClient 获取用户附加的客户端
 func (h *Hub) GetAttachedClient(userID string) (*Connection, bool) {
 	h.mu.RLock()

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -95,11 +96,9 @@ func (hs *HookServer) HandleResponse(requestID string, approved bool) {
 	hs.mu.Unlock()
 }
 
-// Close 关闭 Hook Server 并清理临时文件
+// Close 关闭 Hook Server
 func (hs *HookServer) Close() error {
-	if hs.settings != "" {
-		os.Remove(hs.settings)
-	}
+	// 不删除持久化的 settings 文件，避免被 OS 清理后无法恢复
 	if hs.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -254,19 +253,21 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 		return "", fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp("", "claude-forward-hooks-*.json")
+	// 使用持久化目录，避免被 macOS 清理临时文件
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
+		return "", fmt.Errorf("failed to get home dir: %w", err)
 	}
-	defer tmpFile.Close()
+	settingsDir := filepath.Join(homeDir, ".claude-forward")
+	os.MkdirAll(settingsDir, 0755)
 
-	if _, err := tmpFile.Write(data); err != nil {
-		os.Remove(tmpFile.Name())
+	settingsPath := filepath.Join(settingsDir, "hooks-settings.json")
+	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
 		return "", fmt.Errorf("failed to write settings: %w", err)
 	}
 
-	log.Printf("Generated settings file: %s", tmpFile.Name())
-	return tmpFile.Name(), nil
+	log.Printf("Generated settings file: %s", settingsPath)
+	return settingsPath, nil
 }
 
 // loadUserSettings 读取用户 ~/.claude/settings.json 中的关键配置
