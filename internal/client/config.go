@@ -23,7 +23,6 @@ type Config struct {
 type ServerConfig struct {
 	URL               string `yaml:"url"`
 	Token             string `yaml:"token"`
-	EncryptionKey     string `yaml:"encryption_key"`
 	ReconnectInterval int    `yaml:"reconnect_interval"`
 }
 
