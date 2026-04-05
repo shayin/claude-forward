@@ -579,12 +579,17 @@ func (c *Client) setUser(userID string) {
 }
 
 // sessionEventsPath 返回 sessionEvents 持久化文件路径
+// 每个 client 使用独立文件，避免多客户端共享导致会话记录混淆
 func (c *Client) sessionEventsPath() string {
 	dir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, ".claude-forward", "session_events.json")
+	clientID := c.config.Client.ID
+	if clientID == "" {
+		clientID = "default"
+	}
+	return filepath.Join(dir, ".claude-forward", fmt.Sprintf("session_events_%s.json", clientID))
 }
 
 // saveSessionEvents 将 sessionEvents 持久化到磁盘（调用方需持有 c.sessionMu）

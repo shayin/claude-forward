@@ -67,32 +67,39 @@ func (h *Hub) Run() {
 		case conn := <-h.unregister:
 			h.mu.Lock()
 			if conn.Type == ConnTypeClient {
-				delete(h.clients, conn.ID)
-				// 通知所有附加到此客户端的用户
-				for userID, clientID := range h.attachMap {
-					if clientID == conn.ID {
-						if user, ok := h.users[userID]; ok {
-							user.Send <- &protocol.Message{
-								Type: protocol.TypeDetached,
-								Payload: mustMarshal(protocol.StatusPayload{
-									ClientID: conn.ID,
-									Online:   false,
-									Message:  "client disconnected",
-								}),
+				// 指针比较：只有 map 中存储的连接就是要注销的连接时才删除
+				// 防止旧连接注销时误删同 ID 的新连接
+				if existing, ok := h.clients[conn.ID]; ok && existing == conn {
+					delete(h.clients, conn.ID)
+					// 通知所有附加到此客户端的用户
+					for userID, clientID := range h.attachMap {
+						if clientID == conn.ID {
+							if user, ok := h.users[userID]; ok {
+								user.Send <- &protocol.Message{
+									Type: protocol.TypeDetached,
+									Payload: mustMarshal(protocol.StatusPayload{
+										ClientID: conn.ID,
+										Online:   false,
+										Message:  "client disconnected",
+									}),
+								}
 							}
+							delete(h.attachMap, userID)
 						}
-						delete(h.attachMap, userID)
 					}
 				}
 			} else {
-				delete(h.users, conn.ID)
-				if clientID, ok := h.attachMap[conn.ID]; ok {
-					delete(h.attachMap, conn.ID)
-					// 通知 Client 该用户已断开
-					if client, ok := h.clients[clientID]; ok {
-						client.Send <- &protocol.Message{
-							Type: protocol.TypeDetach,
-							From: conn.ID,
+				// 指针比较：防止旧连接注销时误删同 ID 的新连接
+				if existing, ok := h.users[conn.ID]; ok && existing == conn {
+					delete(h.users, conn.ID)
+					if clientID, ok := h.attachMap[conn.ID]; ok {
+						delete(h.attachMap, conn.ID)
+						// 通知 Client 该用户已断开
+						if client, ok := h.clients[clientID]; ok {
+							client.Send <- &protocol.Message{
+								Type: protocol.TypeDetach,
+								From: conn.ID,
+							}
 						}
 					}
 				}
