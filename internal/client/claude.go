@@ -150,6 +150,10 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 	cmd := exec.CommandContext(ctx, cm.config.Path, args...)
 	cmd.Dir = cm.getWorkDir()
 
+	// 注入用户 settings.json 中的 env 变量到进程环境
+	// 因为 --setting-sources "" 阻止了 Claude 加载 settings，env 中的认证信息不会被自动应用
+	cm.injectUserEnv(cmd)
+
 	// 日志重定向到文件（按 clientID 区分），避免干扰
 	logName := "claude-forward-claude.log"
 	if cm.config.ClientID != "" {
@@ -501,4 +505,31 @@ func parseStreamEvent(line, typeStr string) []ClaudeEvent {
 	}
 
 	return nil
+}
+
+// injectUserEnv 从 ~/.claude/settings.json 读取 env 配置并注入到 Claude 进程环境
+// 因为 --setting-sources "" 阻止了 Claude 加载用户 settings，导致 env 中的 API 认证信息丢失
+func (cm *ClaudeManager) injectUserEnv(cmd *exec.Cmd) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	data, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+	if err != nil {
+		return
+	}
+
+	var settings struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil || len(settings.Env) == 0 {
+		return
+	}
+
+	// 继承当前进程环境，追加用户 env
+	cmd.Env = os.Environ()
+	for k, v := range settings.Env {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	}
 }
