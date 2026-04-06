@@ -116,6 +116,7 @@ func (c *Client) Run() {
 	c.tmux = NewTmuxManager(c.config.Tmux)
 
 	// 初始化 Claude 管理器
+	c.config.Claude.ClientID = c.config.Client.ID
 	c.claude = NewClaudeManager(c.config.Claude)
 
 	// 从磁盘恢复会话事件
@@ -558,7 +559,7 @@ func (c *Client) initPermissionSystem() error {
 		}
 	}
 
-	hs, err := NewHookServer(checker, timeout, sendToUI)
+	hs, err := NewHookServer(checker, timeout, sendToUI, c.config.Client.ID)
 	if err != nil {
 		return fmt.Errorf("failed to start hook server: %w", err)
 	}

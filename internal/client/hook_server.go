@@ -28,15 +28,17 @@ type HookServer struct {
 	sendToUI func(msg *protocol.Message)
 	timeout  time.Duration
 	settings string // 生成的 settings 文件路径
+	clientID string // 客户端唯一标识
 }
 
 // NewHookServer 创建并启动 Hook Server
-func NewHookServer(checker *PermissionChecker, timeout time.Duration, sendToUI func(msg *protocol.Message)) (*HookServer, error) {
+func NewHookServer(checker *PermissionChecker, timeout time.Duration, sendToUI func(msg *protocol.Message), clientID string) (*HookServer, error) {
 	hs := &HookServer{
-		checker: checker,
-		pending: make(map[string]chan bool),
+		checker:  checker,
+		pending:  make(map[string]chan bool),
 		sendToUI: sendToUI,
-		timeout: timeout,
+		timeout:  timeout,
+		clientID: clientID,
 	}
 
 	mux := http.NewServeMux()
@@ -262,6 +264,9 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 	os.MkdirAll(settingsDir, 0755)
 
 	settingsPath := filepath.Join(settingsDir, "hooks-settings.json")
+	if hs.clientID != "" {
+		settingsPath = filepath.Join(settingsDir, fmt.Sprintf("hooks-settings-%s.json", hs.clientID))
+	}
 	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
 		return "", fmt.Errorf("failed to write settings: %w", err)
 	}

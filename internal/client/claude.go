@@ -63,6 +63,7 @@ type ClaudeConfig struct {
 	AllowedTools     string `yaml:"allowed_tools"`                 // 允许的工具列表
 	MaxTurns         int    `yaml:"max_turns"`                     // 最大轮次
 	HookSettingsPath string `yaml:"-"` // Hook 配置文件路径（程序设置，不从 YAML 读取）
+	ClientID         string `yaml:"-"` // 客户端唯一标识（用于区分多客户端文件路径）
 }
 
 // NewClaudeManager 创建 Claude 管理器
@@ -149,8 +150,12 @@ func (cm *ClaudeManager) SendMessage(text string) error {
 	cmd := exec.CommandContext(ctx, cm.config.Path, args...)
 	cmd.Dir = cm.getWorkDir()
 
-	// 日志重定向到文件，避免干扰
-	logFile, err := os.OpenFile("/tmp/claude-forward-claude.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// 日志重定向到文件（按 clientID 区分），避免干扰
+	logName := "claude-forward-claude.log"
+	if cm.config.ClientID != "" {
+		logName = fmt.Sprintf("claude-forward-claude-%s.log", cm.config.ClientID)
+	}
+	logFile, err := os.OpenFile(filepath.Join(os.TempDir(), logName), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		cmd.Stderr = logFile
 	}
@@ -262,13 +267,17 @@ func (cm *ClaudeManager) getWorkDir() string {
 	return dir
 }
 
-// sessionIDPath 返回 session_id 持久化文件路径
+// sessionIDPath 返回 session_id 持久化文件路径（按 clientID 区分）
 func (cm *ClaudeManager) sessionIDPath() string {
 	dir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, ".claude-forward", "session_id")
+	name := "session_id"
+	if cm.config.ClientID != "" {
+		name = fmt.Sprintf("session_id_%s", cm.config.ClientID)
+	}
+	return filepath.Join(dir, ".claude-forward", name)
 }
 
 // saveSessionID 将 session_id 写入文件（调用方需持有 cm.mu）
