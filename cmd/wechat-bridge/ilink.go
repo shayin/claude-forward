@@ -41,7 +41,8 @@ func newILinkBot() *iLinkBot {
 
 // qrCodeResponse 获取二维码响应
 type qrCodeResponse struct {
-	QRCode string `json:"qrcode"`
+	QRCode         string `json:"qrcode"`            // 轮询 token
+	QRCodeImgContent string `json:"qrcode_img_content"` // 二维码内容/链接
 }
 
 // qrStatusResponse 二维码状态响应
@@ -61,33 +62,42 @@ type LoginResult struct {
 	UserID   string
 }
 
+// qrStartResult 二维码启动结果
+type qrStartResult struct {
+	Token       string // 轮询 token
+	QRCodeURL   string // 二维码内容/链接
+}
+
 // fetchQRCode 获取登录二维码
-func (b *iLinkBot) fetchQRCode() (string, error) {
+func (b *iLinkBot) fetchQRCode() (*qrStartResult, error) {
 	url := fmt.Sprintf("%s/ilink/bot/get_bot_qrcode?bot_type=3", b.BaseURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("iLink-App-Id", ilinkAppID)
 	req.Header.Set("iLink-App-ClientVersion", "131143") // 2.1.7 encoded
 
 	resp, err := b.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch QR code failed: %w", err)
+		return nil, fmt.Errorf("fetch QR code failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("fetch QR code failed: %s", body)
+		return nil, fmt.Errorf("fetch QR code failed: %s", body)
 	}
 
 	var result qrCodeResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("parse QR code response failed: %w", err)
+		return nil, fmt.Errorf("parse QR code response failed: %w", err)
 	}
 
-	return result.QRCode, nil
+	return &qrStartResult{
+		Token:     result.QRCode,
+		QRCodeURL: result.QRCodeImgContent,
+	}, nil
 }
 
 // waitForLogin 等待扫码登录

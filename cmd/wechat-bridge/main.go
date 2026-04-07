@@ -35,7 +35,7 @@ func main() {
 
 	bot := newILinkBot()
 
-	qrcode, err := bot.fetchQRCode()
+	qrResult, err := bot.fetchQRCode()
 	if err != nil {
 		log.Fatalf("获取二维码失败: %v", err)
 	}
@@ -43,10 +43,12 @@ func main() {
 	fmt.Println()
 	fmt.Println("请用微信扫描以下二维码完成连接：")
 	fmt.Println()
-	fmt.Println(qrcode)
+	fmt.Println(qrResult.QRCodeURL)
+	fmt.Println()
+	fmt.Println("（如果二维码无法显示，请复制上面的链接到手机浏览器打开）")
 	fmt.Println()
 
-	result, err := bot.waitForLogin(qrcode, 8*time.Minute)
+	result, err := bot.waitForLogin(qrResult.Token, 8*time.Minute)
 	if err != nil {
 		log.Fatalf("登录失败: %v", err)
 	}
@@ -107,10 +109,11 @@ func main() {
 				continue
 			}
 
-			// 解析目标 clawbot_id
-			clawbotID := cfg.ResolveClawbotID(fromUser)
-			if clawbotID == "" {
-				bot.SendMessage(fromUser, "❌ 未配置路由。请联系管理员配置，或使用 /switch <clawbot_id> 选择目标。", ctxToken)
+			// 白名单检查
+			clawbotID, err := cfg.ResolveClawbotID(fromUser)
+			if err != nil {
+				log.Printf("[REJECT] 拒绝未授权用户: %s", fromUser)
+				bot.SendMessage(fromUser, "⛔ 你没有使用权限", ctxToken)
 				continue
 			}
 
@@ -177,7 +180,7 @@ func handleCommand(bridge *Bridge, bot *iLinkBot, cfg *Config, fromUser, text, c
 
 	switch cmd {
 	case "/clients":
-		clawbotID := cfg.ResolveClawbotID(fromUser)
+		clawbotID, _ := cfg.ResolveClawbotID(fromUser)
 		var clients []protocol.ClientInfo
 		var err error
 
@@ -214,7 +217,7 @@ func handleCommand(bridge *Bridge, bot *iLinkBot, cfg *Config, fromUser, text, c
 			return
 		}
 		targetID := parts[1]
-		clawbotID := cfg.ResolveClawbotID(fromUser)
+		clawbotID, _ := cfg.ResolveClawbotID(fromUser)
 		bridge.SetSession(fromUser, clawbotID, targetID)
 		bot.SendMessage(fromUser, fmt.Sprintf("✅ 已切换到 %s", targetID), ctxToken)
 		log.Printf("[SESSION] %s 手动切换到 %s", fromUser, targetID)
