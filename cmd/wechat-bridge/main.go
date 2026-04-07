@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mdp/qrterminal/v3"
 	"github.com/shayin/claude-forward/internal/protocol"
 )
 
@@ -43,9 +44,15 @@ func main() {
 	fmt.Println()
 	fmt.Println("请用微信扫描以下二维码完成连接：")
 	fmt.Println()
-	fmt.Println(qrResult.QRCodeURL)
+	qrterminal.GenerateWithConfig(qrResult.QRCodeURL, qrterminal.Config{
+		Level:     qrterminal.L,
+		Writer:    os.Stdout,
+		BlackChar: qrterminal.BLACK,
+		WhiteChar: qrterminal.WHITE,
+	})
 	fmt.Println()
-	fmt.Println("（如果二维码无法显示，请复制上面的链接到手机浏览器打开）")
+	fmt.Println("如果二维码显示不全，请复制以下链接到手机浏览器打开：")
+	fmt.Println(qrResult.QRCodeURL)
 	fmt.Println()
 
 	result, err := bot.waitForLogin(qrResult.Token, 8*time.Minute)
