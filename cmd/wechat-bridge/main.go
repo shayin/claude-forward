@@ -45,10 +45,11 @@ func main() {
 	fmt.Println("请用微信扫描以下二维码完成连接：")
 	fmt.Println()
 	qrterminal.GenerateWithConfig(qrResult.QRCodeURL, qrterminal.Config{
-		Level:     qrterminal.L,
-		Writer:    os.Stdout,
-		BlackChar: qrterminal.BLACK,
-		WhiteChar: qrterminal.WHITE,
+		Level:      qrterminal.L,
+		Writer:     os.Stdout,
+		BlackChar:  qrterminal.BLACK,
+		WhiteChar:  qrterminal.WHITE,
+		HalfBlocks: true,
 	})
 	fmt.Println()
 	fmt.Println("如果二维码显示不全，请复制以下链接到手机浏览器打开：")

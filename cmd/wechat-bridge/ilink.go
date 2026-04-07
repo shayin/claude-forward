@@ -289,10 +289,18 @@ func (b *iLinkBot) GetUpdates() ([]weixinMessage, string, error) {
 	return resp.Msgs, b.UpdateBuf, nil
 }
 
+// sendmessageResponse sendmessage 响应
+type sendmessageResponse struct {
+	Ret     int    `json:"ret"`
+	ErrCode int    `json:"errcode,omitempty"`
+	ErrMsg  string `json:"errmsg,omitempty"`
+}
+
 // SendMessage 发送文本消息
 func (b *iLinkBot) SendMessage(toUserID, text, contextToken string) error {
-	clientID := fmt.Sprintf("openclaw-weixin-%x", make([]byte, 8))
-	rand.Read([]byte(clientID[len("openclaw-weixin-"):]))
+	randBytes := make([]byte, 8)
+	rand.Read(randBytes)
+	clientID := fmt.Sprintf("openclaw-weixin-%x", randBytes)
 
 	msg := weixinMessage{
 		FromUserID:  "",
@@ -306,11 +314,24 @@ func (b *iLinkBot) SendMessage(toUserID, text, contextToken string) error {
 		},
 	}
 
-	_, err := b.post("sendmessage", sendMessageRequest{
+	respBody, err := b.post("sendmessage", sendMessageRequest{
 		Msg:      msg,
 		BaseInfo: baseInfo{ChannelVersion: ilinkChannelVersion},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	var resp sendmessageResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		log.Printf("[SendMessage] 解析响应失败: %v, body: %s", err, string(respBody))
+		return nil
+	}
+	if resp.Ret != 0 {
+		log.Printf("[SendMessage] API 错误: ret=%d, errcode=%d, errmsg=%s", resp.Ret, resp.ErrCode, resp.ErrMsg)
+		return fmt.Errorf("sendmessage failed: ret=%d, errmsg=%s", resp.Ret, resp.ErrMsg)
+	}
+	return nil
 }
 
 // SendTyping 发送输入状态
