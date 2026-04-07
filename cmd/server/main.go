@@ -62,6 +62,11 @@ func main() {
 		w.Write(mustMarshal(clients))
 	})
 
+	// Bot API（供微信桥接等第三方服务调用）
+	botHandler := server.NewBotHandler(hub, auth)
+	http.HandleFunc("/api/bot/chat", botHandler.HandleChat)
+	http.HandleFunc("/api/bot/clients", botHandler.HandleClients)
+
 	// 构建信息 API
 	http.HandleFunc("/api/build-info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

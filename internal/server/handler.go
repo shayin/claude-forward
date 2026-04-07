@@ -207,6 +207,7 @@ func (h *Handler) handleRegister(conn *Connection, msg *protocol.Message) {
 	conn.ClientID = payload.ID
 	conn.ClientName = payload.Name
 	conn.Description = payload.Description
+	conn.ClawbotID = payload.ClawbotID
 	conn.PID = payload.PID
 	conn.Path = payload.Path
 

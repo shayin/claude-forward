@@ -24,6 +24,7 @@ type Connection struct {
 	ClientID    string // 如果是用户连接，记录其附加的客户端ID
 	ClientName  string // 客户端名称（注册时设置）
 	Description string // 客户端描述（注册时设置）
+	ClawbotID   string // 电脑级别 ID（用于微信路由）
 	PID         int    // 客户端进程 ID
 	Path        string // 客户端工作目录
 	Send        chan *protocol.Message
@@ -115,6 +116,24 @@ func (h *Hub) RegisterClient(conn *Connection) {
 	h.register <- conn
 }
 
+// RegisterBotUser 注册虚拟 Bot 用户（同步，直接操作 map）
+func (h *Hub) RegisterBotUser(conn *Connection) {
+	h.mu.Lock()
+	h.users[conn.ID] = conn
+	h.mu.Unlock()
+}
+
+// CleanupBotUser 清理虚拟 Bot 用户
+func (h *Hub) CleanupBotUser(conn *Connection) {
+	h.mu.Lock()
+	// 指针比较防止误删
+	if existing, ok := h.users[conn.ID]; ok && existing == conn {
+		delete(h.users, conn.ID)
+		delete(h.attachMap, conn.ID)
+	}
+	h.mu.Unlock()
+}
+
 // Unregister 注销连接
 func (h *Hub) Unregister(conn *Connection) {
 	h.unregister <- conn
@@ -139,6 +158,7 @@ func (h *Hub) ListClients() []protocol.ClientInfo {
 			ID:          conn.ID,
 			Name:        conn.ClientName,
 			Description: conn.Description,
+			ClawbotID:   conn.ClawbotID,
 			PID:         conn.PID,
 			Path:        conn.Path,
 			Online:      true,
@@ -192,6 +212,39 @@ func (h *Hub) GetAttachedClient(userID string) (*Connection, bool) {
 	conn, ok := h.clients[clientID]
 	h.mu.RUnlock()
 	return conn, ok
+}
+
+// FindClientByClawbotID 按 ClawbotID 查找第一个在线的 Client
+func (h *Hub) FindClientByClawbotID(clawbotID string) (*Connection, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, conn := range h.clients {
+		if conn.ClawbotID == clawbotID {
+			return conn, true
+		}
+	}
+	return nil, false
+}
+
+// ListClientsByClawbotID 按 ClawbotID 列出所有 Client
+func (h *Hub) ListClientsByClawbotID(clawbotID string) []protocol.ClientInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var clients []protocol.ClientInfo
+	for _, conn := range h.clients {
+		if conn.ClawbotID == clawbotID {
+			clients = append(clients, protocol.ClientInfo{
+				ID:          conn.ID,
+				Name:        conn.ClientName,
+				Description: conn.Description,
+				ClawbotID:   conn.ClawbotID,
+				PID:         conn.PID,
+				Path:        conn.Path,
+				Online:      true,
+			})
+		}
+	}
+	return clients
 }
 
 // GetUser 获取用户连接

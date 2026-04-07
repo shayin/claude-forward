@@ -31,6 +31,7 @@ type ClientConfig struct {
 	ID          string `yaml:"id"`
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
+	ClawbotID   string `yaml:"clawbot_id"` // 电脑级别 ID，用于微信路由
 }
 
 // TmuxConfig tmux 配置
@@ -84,6 +85,13 @@ func ApplyDefaults(config *Config) {
 	}
 	if config.Path == "" {
 		config.Path = absPath
+	}
+	if config.Client.ClawbotID == "" {
+		hostname, _ := os.Hostname()
+		if hostname == "" {
+			hostname = "unknown"
+		}
+		config.Client.ClawbotID = hostname
 	}
 }
 

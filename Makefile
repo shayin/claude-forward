@@ -1,8 +1,9 @@
-.PHONY: all build build-server build-client build-cli install-client clean test run-server run-client
+.PHONY: all build build-server build-client build-cli build-wechat-bridge install-client clean test run-server run-client run-wechat-bridge
 
 BINARY_SERVER=bin/server
 BINARY_CLIENT=bin/client
 BINARY_CLI=bin/cli
+BINARY_WECHAT_BRIDGE=bin/wechat-bridge
 
 all: build
 
@@ -26,6 +27,11 @@ build-cli:
 	@echo "Building CLI..."
 	@mkdir -p bin
 	go build -o $(BINARY_CLI) ./cmd/cli
+
+build-wechat-bridge:
+	@echo "Building wechat-bridge..."
+	@mkdir -p bin
+	go build -o $(BINARY_WECHAT_BRIDGE) ./cmd/wechat-bridge
 
 install-client: build-client
 	@mkdir -p $(HOME)/.claude-forward
@@ -52,6 +58,9 @@ run-server:
 
 run-client:
 	go run ./cmd/client
+
+run-wechat-bridge:
+	go run ./cmd/wechat-bridge
 
 # 前端构建
 build-web:

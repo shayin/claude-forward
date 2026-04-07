@@ -62,6 +62,7 @@ type RegisterPayload struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	ClawbotID   string `json:"clawbot_id,omitempty"`
 	PID         int    `json:"pid"`
 	Path        string `json:"path"`
 }
@@ -99,6 +100,7 @@ type ClientInfo struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	ClawbotID   string `json:"clawbot_id,omitempty"`
 	PID         int    `json:"pid"`
 	Path        string `json:"path"`
 	Online      bool   `json:"online"`

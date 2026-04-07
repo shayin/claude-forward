@@ -81,6 +81,7 @@ func (c *Client) Connect() error {
 		ID:          c.config.Client.ID,
 		Name:        c.config.Client.Name,
 		Description: c.config.Client.Description,
+		ClawbotID:   c.config.Client.ClawbotID,
 		PID:         os.Getpid(),
 		Path:        c.config.Path,
 	})
