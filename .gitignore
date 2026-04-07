@@ -41,6 +41,7 @@ test-*.yaml
 # Generated config files (templates are tracked)
 configs/server.yaml
 configs/client.yaml
+configs/wechat-bridge.yaml
 
 # Generated certificates
 certs/
