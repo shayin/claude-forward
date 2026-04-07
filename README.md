@@ -68,16 +68,11 @@ make build
 
 ### 2. 部署服务器（云服务器）
 
-将编译产物上传到云服务器：
+在云服务器上：
 
 ```bash
-scp -r bin/ web/ configs/ deploy/ user@your-server:~/claude-forward/
-```
-
-SSH 到云服务器，运行一键部署：
-
-```bash
-cd ~/claude-forward
+git clone https://github.com/shayin/claude-forward.git
+cd claude-forward && make build
 sudo bash deploy/install.sh
 ```
 
@@ -90,32 +85,14 @@ sudo systemctl enable claude-forward-server  # 开机自启
 
 ### 3. 启动客户端（你的电脑）
 
-从云服务器下载客户端和配置文件：
-
 ```bash
-mkdir -p ~/.claude-forward
-
-# 下载客户端
-scp user@your-server:/opt/claude-forward/client ~/.claude-forward/
-chmod +x ~/.claude-forward/client
-
-# 下载配置模板
-scp user@your-server:/opt/claude-forward/client.yaml.example ~/.claude-forward/client.yaml
+git clone https://github.com/shayin/claude-forward.git
+cd claude-forward && make install-client
+sudo ln -sf ~/.claude-forward/client /usr/local/bin/cf  # 如果上一步提示权限不足
+vim ~/.claude-forward/client.yaml   # 填入服务器地址和 Token
 ```
 
-编辑 `~/.claude-forward/client.yaml`，填入你的服务器地址和 Token：
-
-```yaml
-server:
-  url: "wss://your-server-ip:6022"
-  token: "your-secret-token"
-```
-
-启动客户端：
-
-```bash
-~/.claude-forward/client -config ~/.claude-forward/client.yaml
-```
+之后在任意项目目录下 `cf` 即可启动。
 
 ### 4. 打开手机浏览器
 
@@ -152,7 +129,7 @@ logging:
   log_level: "info"
 ```
 
-### 客户端配置 (`client.yaml`)
+### 客户端配置 (`~/.claude-forward/client.yaml`)
 
 ```yaml
 server:
@@ -161,13 +138,12 @@ server:
   reconnect_interval: 5     # 重连间隔（秒）
 
 client:
-  id: "home-pc"             # 客户端标识，留空自动生成
-  name: "Home Desktop"      # 显示名称
+  id: ""                    # 留空自动推导为 hostname-basename
+  name: ""                  # 留空自动推导为项目目录名
 
 tmux:
-  session_name: "claude-forward"
+  session_name: ""          # 留空自动推导为 cf-basename
   auto_start: true
-  shell: "/bin/bash"
 ```
 
 ## 权限审批
@@ -216,12 +192,13 @@ claude-forward/
 ## 开发
 
 ```bash
-make deps          # 安装依赖
-make build         # 编译
-make run-server    # 开发模式运行服务器
-make run-client    # 开发模式运行客户端
-make gen-cert      # 生成自签名证书
-make test          # 运行测试
+make deps             # 安装依赖
+make build            # 编译 server + client
+make install-client   # 编译 client 并安装到 ~/.claude-forward/ + 创建 cf 命令
+make run-server       # 开发模式运行服务器
+make run-client       # 开发模式运行客户端
+make gen-cert         # 生成自签名证书
+make test             # 运行测试
 ```
 
 ## 常见问题
