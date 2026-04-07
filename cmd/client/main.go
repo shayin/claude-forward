@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -11,15 +12,44 @@ import (
 	"github.com/shayin/claude-forward/internal/client"
 )
 
+// buildInfo 通过 ldflags 注入
+var buildInfo string
+
 func main() {
 	// 解析命令行参数
-	configPath := flag.String("config", "configs/client.yaml", "配置文件路径")
+	configPath := flag.String("config", "", "配置文件路径（留空自动搜索 ~/.claude-forward/client.yaml 或 configs/client.yaml）")
+	workDir := flag.String("dir", "", "工作目录，即 Claude 控制的项目目录（默认为当前目录）")
+	showVersion := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
 
-	// 加载配置
-	config, err := client.LoadConfig(*configPath)
-	if err != nil {
-		log.Printf("Using default config: %v", err)
+	if *showVersion {
+		if buildInfo != "" {
+			fmt.Println(buildInfo)
+		} else {
+			fmt.Println("dev")
+		}
+		return
+	}
+
+	// 切换工作目录
+	if *workDir != "" {
+		if err := os.Chdir(*workDir); err != nil {
+			log.Fatalf("Failed to change to work directory %s: %v", *workDir, err)
+		}
+	}
+
+	// 查找并加载配置文件
+	resolvedPath := client.ResolveConfigPath(*configPath)
+	var config *client.Config
+	if resolvedPath != "" {
+		var err error
+		config, err = client.LoadConfig(resolvedPath)
+		if err != nil {
+			log.Fatalf("Failed to load config %s: %v", resolvedPath, err)
+		}
+		log.Printf("Using config: %s", resolvedPath)
+	} else {
+		log.Printf("No config file found, using defaults")
 		config = client.DefaultConfig()
 		client.ApplyDefaults(config)
 	}

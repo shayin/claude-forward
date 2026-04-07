@@ -77,6 +77,13 @@ build() {
     print_info "正在编译客户端..."
     make build-client
     print_step "编译完成"
+
+    # 同步到已安装的位置
+    INSTALLED="$HOME/.claude-forward/client"
+    if [ -f "$INSTALLED" ]; then
+        cp "$BINARY" "$INSTALLED"
+        print_step "已同步到 $INSTALLED"
+    fi
 }
 
 # 启动
@@ -88,7 +95,11 @@ start() {
 
     # 检查配置文件
     if [ ! -f "$CONFIG_FILE" ]; then
-        if [ -f "$CONFIG_TPL" ]; then
+        GLOBAL_CONFIG="$HOME/.claude-forward/client.yaml"
+        if [ -f "$GLOBAL_CONFIG" ]; then
+            CONFIG_FILE="$GLOBAL_CONFIG"
+            print_info "使用全局配置: $CONFIG_FILE"
+        elif [ -f "$CONFIG_TPL" ]; then
             print_info "从模板创建配置文件..."
             cp "$CONFIG_TPL" "$CONFIG_FILE"
             print_step "配置文件已创建: $CONFIG_FILE"

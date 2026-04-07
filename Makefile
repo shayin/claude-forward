@@ -1,4 +1,4 @@
-.PHONY: all build build-server build-client build-cli clean test run-server run-client
+.PHONY: all build build-server build-client build-cli install-client clean test run-server run-client
 
 BINARY_SERVER=bin/server
 BINARY_CLIENT=bin/client
@@ -20,12 +20,25 @@ build-server:
 build-client:
 	@echo "Building client..."
 	@mkdir -p bin
-	go build -o $(BINARY_CLIENT) ./cmd/client
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY_CLIENT) ./cmd/client
 
 build-cli:
 	@echo "Building CLI..."
 	@mkdir -p bin
 	go build -o $(BINARY_CLI) ./cmd/cli
+
+install-client: build-client
+	@mkdir -p $(HOME)/.claude-forward
+	cp bin/client $(HOME)/.claude-forward/client
+	@if [ ! -L /usr/local/bin/cf ]; then \
+		ln -sf $(HOME)/.claude-forward/client /usr/local/bin/cf 2>/dev/null || \
+		echo "提示: 无法创建 /usr/local/bin/cf，请手动执行: sudo ln -sf $$HOME/.claude-forward/client /usr/local/bin/cf"; \
+	fi
+	@if [ ! -f $(HOME)/.claude-forward/client.yaml ]; then \
+		cp configs/client.yaml.tpl $(HOME)/.claude-forward/client.yaml; \
+		echo "已创建配置文件: ~/.claude-forward/client.yaml，请编辑填写服务器信息"; \
+	fi
+	@echo "安装完成！使用: cf"
 
 clean:
 	@echo "Cleaning..."

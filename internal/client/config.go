@@ -111,6 +111,29 @@ func DeriveFromPath(projectPath string) (string, string, string) {
 	return sessionName, basename, absPath
 }
 
+// ResolveConfigPath 按优先级查找配置文件路径
+// 1. 显式指定路径（非空则直接使用）
+// 2. ~/.claude-forward/client.yaml（全局默认）
+// 3. configs/client.yaml（CWD 下，向后兼容）
+// 4. 都没有则返回空字符串，由调用方使用 DefaultConfig
+func ResolveConfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	homeDir, err := os.UserHomeDir()
+	if err == nil && homeDir != "" {
+		globalPath := filepath.Join(homeDir, ".claude-forward", "client.yaml")
+		if _, err := os.Stat(globalPath); err == nil {
+			return globalPath
+		}
+	}
+	localPath := "configs/client.yaml"
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath
+	}
+	return ""
+}
+
 // GenerateClientID 生成客户端 ID：hostname-basename
 func GenerateClientID(basename string) string {
 	hostname, _ := os.Hostname()

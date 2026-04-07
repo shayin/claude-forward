@@ -240,33 +240,9 @@ EOF
 
 # 生成客户端配置示例
 generate_client_config() {
-    # 从模板复制并替换变量
-    if [ -f "$CONFIGS_DIR/client.yaml.tpl" ]; then
-        sed -e "s|wss://your-server-ip:6022|wss://$SERVER_IP:$PORT|g" \
-            -e "s/your-secret-token-here/$TOKEN/g" \
-            "$CONFIGS_DIR/client.yaml.tpl" > "$INSTALL_DIR/client.yaml.example"
-    else
-        # 如果模板不存在，生成默认配置
-        cat > "$INSTALL_DIR/client.yaml.example" << EOF
-# Claude Forward 客户端配置
-# 复制到本地电脑使用
-
-server:
-  url: "wss://$SERVER_IP:$PORT"
-  token: "$TOKEN"
-  reconnect_interval: 5
-
-client:
-  id: "home-pc"
-  name: "Home Desktop"
-  description: "我的开发电脑"
-
-tmux:
-  session_name: "claude-forward"
-  auto_start: true
-  shell: "/bin/bash"
-EOF
-    fi
+    sed -e "s|wss://your-server-ip:6022|wss://$SERVER_IP:$PORT|g" \
+        -e "s/your-secret-token-here/$TOKEN/g" \
+        "$CONFIGS_DIR/client.yaml.tpl" > "$INSTALL_DIR/client.yaml.example"
 
     print_step "客户端配置示例已生成"
 }

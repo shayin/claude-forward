@@ -9,7 +9,7 @@ server:
 
 # 终端模式配置（用于 tmux 终端转发，聊天模式不需要）
 tmux:
-  session_name: ""                    # tmux session 名称，留空自动生成
+  session_name: ""                    # tmux session 名称，留空自动从项目目录推导
   auto_start: true                    # 是否自动创建 tmux session
   shell: ""                           # 默认 shell，留空使用系统默认
 
