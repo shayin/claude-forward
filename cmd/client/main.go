@@ -74,7 +74,13 @@ func main() {
 	// 等待信号
 	<-sigChan
 	log.Println("Shutting down client...")
-	c.Disconnect()
+	c.Shutdown()
+
+	// 第二次 Ctrl+C 直接退出
+	go func() {
+		<-sigChan
+		os.Exit(0)
+	}()
 
 	// 清理 tmux session
 	killTmuxSession(config.Tmux.SessionName)

@@ -115,6 +115,22 @@ func (c *Client) Disconnect() {
 	}
 }
 
+// Shutdown 优雅关闭：停止 Claude 子进程、停止 Run 协程、断开连接
+func (c *Client) Shutdown() {
+	// 1. 停止 Claude 子进程
+	if c.claude != nil {
+		c.claude.Abort()
+	}
+	// 2. 取消客户端上下文（停止 Run 重连循环）
+	c.cancel()
+	// 3. 断开 WebSocket
+	c.Disconnect()
+	// 4. 关闭 tmux
+	if c.tmux != nil {
+		c.tmux.Close()
+	}
+}
+
 // Run 运行客户端（带重连）
 func (c *Client) Run() {
 	// 初始化 tmux 管理器
