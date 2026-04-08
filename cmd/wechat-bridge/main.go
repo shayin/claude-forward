@@ -32,39 +32,65 @@ func main() {
 	bridge := NewBridge(cfg.Server.URL, cfg.Server.Token)
 
 	// ===== 微信登录 =====
-	log.Println("=== 微信扫码登录 ===")
-
 	bot := newILinkBot()
 
-	qrResult, err := bot.fetchQRCode()
-	if err != nil {
-		log.Fatalf("获取二维码失败: %v", err)
+	// 尝试复用已保存的 session
+	var result *LoginResult
+	saved, err := LoadSession()
+	if err == nil && saved != nil {
+		log.Println("发现已保存的登录凭证，尝试复用...")
+		bot.Token = saved.BotToken
+		bot.BaseURL = saved.BaseURL
+		if bot.ValidateSession() {
+			result = saved
+			log.Printf("凭证有效！Bot ID: %s, User ID: %s（跳过扫码）", result.BotID, result.UserID)
+		} else {
+			log.Println("凭证已失效，需要重新扫码登录")
+			bot.Token = ""
+			bot.BaseURL = defaultBaseURL
+		}
 	}
 
-	fmt.Println()
-	fmt.Println("请用微信扫描以下二维码完成连接：")
-	fmt.Println()
-	qrterminal.GenerateWithConfig(qrResult.QRCodeURL, qrterminal.Config{
-		Level:      qrterminal.L,
-		Writer:     os.Stdout,
-		BlackChar:  qrterminal.BLACK,
-		WhiteChar:  qrterminal.WHITE,
-		HalfBlocks: true,
-	})
-	fmt.Println()
-	fmt.Println("如果二维码显示不全，请复制以下链接到手机浏览器打开：")
-	fmt.Println(qrResult.QRCodeURL)
-	fmt.Println()
+	// 需要扫码登录
+	if result == nil {
+		log.Println("=== 微信扫码登录 ===")
 
-	result, err := bot.waitForLogin(qrResult.Token, 8*time.Minute)
-	if err != nil {
-		log.Fatalf("登录失败: %v", err)
+		qrResult, err := bot.fetchQRCode()
+		if err != nil {
+			log.Fatalf("获取二维码失败: %v", err)
+		}
+
+		fmt.Println()
+		fmt.Println("请用微信扫描以下二维码完成连接：")
+		fmt.Println()
+		qrterminal.GenerateWithConfig(qrResult.QRCodeURL, qrterminal.Config{
+			Level:     qrterminal.L,
+			Writer:    os.Stdout,
+			BlackChar: "█",
+			WhiteChar: " ",
+		})
+		fmt.Println()
+		fmt.Println("如果二维码显示不全，请复制以下链接到手机浏览器打开：")
+		fmt.Println(qrResult.QRCodeURL)
+		fmt.Println()
+
+		result, err = bot.waitForLogin(qrResult.Token, 8*time.Minute)
+		if err != nil {
+			log.Fatalf("登录失败: %v", err)
+		}
+
+		// 保存登录凭证
+		bot.Token = result.BotToken
+		bot.BaseURL = result.BaseURL
+
+		if err := SaveSession(result); err != nil {
+			log.Printf("警告：保存登录凭证失败: %v", err)
+		} else {
+			log.Println("登录凭证已保存")
+		}
 	}
 
 	log.Printf("登录成功！Bot ID: %s, User ID: %s", result.BotID, result.UserID)
-
-	bot.Token = result.BotToken
-	bot.BaseURL = result.BaseURL
 
 	fmt.Println()
 	fmt.Println("✅ 微信连接成功！现在可以通过微信与 Claude Code 对话了。")

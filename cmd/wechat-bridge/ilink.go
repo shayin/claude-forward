@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -56,10 +57,62 @@ type qrStatusResponse struct {
 
 // LoginResult 登录结果
 type LoginResult struct {
-	BotToken string
-	BotID    string
-	BaseURL  string
-	UserID   string
+	BotToken string `json:"bot_token"`
+	BotID    string `json:"bot_id"`
+	BaseURL  string `json:"base_url"`
+	UserID   string `json:"user_id"`
+}
+
+// sessionFilePath 返回 session 文件路径
+func sessionFilePath() string {
+	// 优先放在配置同目录下
+	if cfgDir := os.Getenv("WECHAT_BRIDGE_CONFIG_DIR"); cfgDir != "" {
+		return cfgDir + "/wechat-session.json"
+	}
+	return "configs/wechat-session.json"
+}
+
+// SaveSession 保存登录凭证到文件
+func SaveSession(result *LoginResult) error {
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(sessionFilePath(), data, 0600)
+}
+
+// LoadSession 从文件加载登录凭证
+func LoadSession() (*LoginResult, error) {
+	data, err := os.ReadFile(sessionFilePath())
+	if err != nil {
+		return nil, err
+	}
+	var result LoginResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	if result.BotToken == "" {
+		return nil, fmt.Errorf("saved session has no bot_token")
+	}
+	return &result, nil
+}
+
+// ValidateSession 验证已保存的 token 是否有效（通过 getupdates 测试）
+func (b *iLinkBot) ValidateSession() bool {
+	// 用空 buf 调 getupdates，如果 token 无效会返回错误
+	payload := map[string]any{
+		"get_updates_buf": "",
+		"base_info":       baseInfo{ChannelVersion: ilinkChannelVersion},
+	}
+	respBody, err := b.post("getupdates", payload)
+	if err != nil {
+		return false
+	}
+	var resp getUpdatesResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return false
+	}
+	return resp.Ret == 0
 }
 
 // qrStartResult 二维码启动结果
