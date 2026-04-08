@@ -299,13 +299,6 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if strings.HasPrefix(msg.From, "bot-") {
 			// Bot API 连接不需要回放历史事件，直接设置用户 ID
 			c.setUser(msg.From)
-			if !c.claude.IsRunning() {
-				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
-					SessionID: c.claude.SessionID(),
-				})
-				readyMsg.To = msg.From
-				c.send <- readyMsg
-			}
 		} else {
 			// Web UI 连接：回放全部 sessionEvents（支持断线重连恢复完整对话）
 			// 1. 先复制当前所有事件快照
