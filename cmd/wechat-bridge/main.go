@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -89,7 +90,7 @@ func main() {
 
 	fmt.Println()
 	fmt.Println("✅ 微信连接成功！现在可以通过微信与 Claude Code 对话了。")
-	fmt.Println("   指令: /clients /switch <id> /new /status")
+	fmt.Println("   指令: /clients /switch <序号> /new /status")
 	fmt.Println()
 
 	// ===== 消息循环 =====
@@ -132,9 +133,16 @@ func main() {
 			ctxToken := msg.ContextToken
 			log.Printf("收到消息 [from=%s]: %s", fromUser, truncate(text, 80))
 
+			// 发送微信消息并记录错误
+			sendReply := func(text string) {
+				if err := bot.SendMessage(fromUser, text, ctxToken); err != nil {
+					log.Printf("[REPLY ERROR] 发送失败 [to=%s]: %v", fromUser, err)
+				}
+			}
+
 			// 处理指令
 			if strings.HasPrefix(text, "/") {
-				handleCommand(bridge, bot, cfg, fromUser, text, ctxToken)
+				handleCommand(bridge, bot, cfg, fromUser, text, sendReply)
 				continue
 			}
 
@@ -142,7 +150,7 @@ func main() {
 			clawbotID, err := cfg.ResolveClawbotID(fromUser)
 			if err != nil {
 				log.Printf("[REJECT] 拒绝未授权用户: %s", fromUser)
-				bot.SendMessage(fromUser, "⛔ 你没有使用权限", ctxToken)
+				sendReply("⛔ 你没有使用权限")
 				continue
 			}
 
@@ -152,7 +160,7 @@ func main() {
 				// 新会话或 clawbot_id 变更，自动选择第一个 Client
 				clients, err := bridge.ClientsByClawbot(clawbotID)
 				if err != nil || len(clients) == 0 {
-					bot.SendMessage(fromUser, fmt.Sprintf("❌ 电脑 %q 上没有在线的 Client", clawbotID), ctxToken)
+					sendReply(fmt.Sprintf("❌ 电脑 %q 上没有在线的 Client", clawbotID))
 					continue
 				}
 				bridge.SetSession(fromUser, clawbotID, clients[0].ID)
@@ -167,12 +175,12 @@ func main() {
 			resp, err := bridge.Chat(fromUser, text)
 			if err != nil {
 				log.Printf("Bridge error: %v", err)
-				bot.SendMessage(fromUser, fmt.Sprintf("❌ 请求失败: %v", err), ctxToken)
+				sendReply(fmt.Sprintf("❌ 请求失败: %v", err))
 				continue
 			}
 
 			if resp.IsError {
-				bot.SendMessage(fromUser, fmt.Sprintf("❌ Claude 错误: %s", resp.ErrorMsg), ctxToken)
+				sendReply(fmt.Sprintf("❌ Claude 错误: %s", resp.ErrorMsg))
 				continue
 			}
 
@@ -188,7 +196,7 @@ func main() {
 					time.Sleep(500 * time.Millisecond)
 				}
 				if err := bot.SendMessage(fromUser, chunk, ctxToken); err != nil {
-					log.Printf("Send error: %v", err)
+					log.Printf("[REPLY ERROR] 发送失败 [to=%s, chunk=%d]: %v", fromUser, i+1, err)
 				}
 			}
 
@@ -203,7 +211,7 @@ func main() {
 }
 
 // handleCommand 处理微信指令
-func handleCommand(bridge *Bridge, bot *iLinkBot, cfg *Config, fromUser, text, ctxToken string) {
+func handleCommand(bridge *Bridge, bot *iLinkBot, cfg *Config, fromUser, text string, sendReply func(string)) {
 	parts := strings.Fields(text)
 	cmd := parts[0]
 
@@ -220,12 +228,12 @@ func handleCommand(bridge *Bridge, bot *iLinkBot, cfg *Config, fromUser, text, c
 		}
 
 		if err != nil {
-			bot.SendMessage(fromUser, fmt.Sprintf("❌ 获取列表失败: %v", err), ctxToken)
+			sendReply(fmt.Sprintf("❌ 获取列表失败: %v", err))
 			return
 		}
 
 		if len(clients) == 0 {
-			bot.SendMessage(fromUser, "没有在线的客户端", ctxToken)
+			sendReply("没有在线的客户端")
 			return
 		}
 
@@ -236,45 +244,55 @@ func handleCommand(bridge *Bridge, bot *iLinkBot, cfg *Config, fromUser, text, c
 			if s := bridge.GetSession(fromUser); s != nil && s.ClientID == c.ID {
 				active = " ← 当前"
 			}
-			sb.WriteString(fmt.Sprintf("%d. %s (%s) [%s]%s\n", i+1, c.Name, c.ID, c.ClawbotID, active))
+			sb.WriteString(fmt.Sprintf("%d. %s [%s]%s\n", i+1, c.Name, c.ClawbotID, active))
 		}
-		bot.SendMessage(fromUser, sb.String(), ctxToken)
+		sb.WriteString("\n切换: /switch <序号>")
+		sendReply(sb.String())
 
 	case "/switch":
 		if len(parts) < 2 {
-			bot.SendMessage(fromUser, "用法: /switch <client_id>\n用 /clients 查看列表", ctxToken)
+			sendReply("用法: /switch <序号或client_id>\n用 /clients 查看列表")
 			return
 		}
-		targetID := parts[1]
+		target := parts[1]
+
+		// 查找客户端列表，支持序号切换
 		clawbotID, _ := cfg.ResolveClawbotID(fromUser)
+		var targetID string
+		if clients, err := bridge.ClientsByClawbot(clawbotID); err == nil {
+			if idx, e := strconv.Atoi(target); e == nil && idx >= 1 && idx <= len(clients) {
+				targetID = clients[idx-1].ID
+			}
+		}
+		if targetID == "" {
+			targetID = target
+		}
+
 		bridge.SetSession(fromUser, clawbotID, targetID)
-		bot.SendMessage(fromUser, fmt.Sprintf("✅ 已切换到 %s", targetID), ctxToken)
+		sendReply(fmt.Sprintf("✅ 已切换到 %s", targetID))
 		log.Printf("[SESSION] %s 手动切换到 %s", fromUser, targetID)
 
 	case "/new":
-		// 发送 new_session 类型的消息（通过 client_id 直接发）
 		session := bridge.GetSession(fromUser)
 		if session == nil {
-			bot.SendMessage(fromUser, "❌ 请先发送一条消息建立会话", ctxToken)
+			sendReply("❌ 请先发送一条消息建立会话")
 			return
 		}
-		// 通过 Chat 发送特殊指令不太合适，直接用 Bot API
-		// TODO: 后续可在 Server Bot API 添加 /api/bot/session 端点
-		bot.SendMessage(fromUser, "✅ 新会话指令已记录（下一条消息将使用新会话）", ctxToken)
+		sendReply("✅ 新会话指令已记录（下一条消息将使用新会话）")
 
 	case "/status":
 		session := bridge.GetSession(fromUser)
 		if session == nil {
-			bot.SendMessage(fromUser, "当前无活跃会话", ctxToken)
+			sendReply("当前无活跃会话")
 			return
 		}
 		msg := fmt.Sprintf("当前会话：\n- Clawbot: %s\n- Client: %s\n- 活跃时间: %s",
 			session.ClawbotID, session.ClientID,
 			session.LastActive.Format("15:04:05"))
-		bot.SendMessage(fromUser, msg, ctxToken)
+		sendReply(msg)
 
 	default:
-		bot.SendMessage(fromUser, "未知指令。可用指令：/clients /switch <id> /new /status", ctxToken)
+		sendReply("未知指令。可用指令：/clients /switch <序号> /new /status")
 	}
 }
 
