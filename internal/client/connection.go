@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -276,44 +277,56 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		// 启动转发
 		go c.startForwarding(msg.From)
 
-		// === 会话事件回放 ===
-		// 1. 先复制当前所有事件快照
-		c.sessionMu.Lock()
-		events := make([]protocol.Message, len(c.sessionEvents))
-		copy(events, c.sessionEvents)
-		snapshotLen := len(c.sessionEvents)
-		c.sentUpTo = snapshotLen
-		c.sessionMu.Unlock()
-
-		// 2. 回放快照事件（此时 setUser 还没调用，goroutine 不会发送）
-		for i := range events {
-			events[i].To = msg.From
-			c.send <- &events[i]
-		}
-
-		// 3. 发送快照期间新增的事件（必须在 setUser 之前，避免竞态）
-		c.sessionMu.Lock()
-		for i := snapshotLen; i < len(c.sessionEvents); i++ {
-			remaining := c.sessionEvents[i]
-			remaining.To = msg.From
-			c.send <- &remaining
-		}
-		c.sentUpTo = len(c.sessionEvents)
-		c.sessionMu.Unlock()
-
-		// 4. 设置用户 ID（在所有回放事件发送之后，此后 goroutine 可以发送新事件）
-		c.setUser(msg.From)
-
-		// 5. 如果 Claude 已完成，发送 chat_ready
-		if !c.claude.IsRunning() {
-			readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
-				SessionID: c.claude.SessionID(),
-			})
-			readyMsg.To = msg.From
-			c.send <- readyMsg
-			log.Printf("Sent chat_ready to reattached user (Claude idle, replayed %d events)", len(events))
+		if strings.HasPrefix(msg.From, "bot-") {
+			// Bot API 连接不需要回放历史事件，直接设置用户 ID
+			c.setUser(msg.From)
+			if !c.claude.IsRunning() {
+				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+					SessionID: c.claude.SessionID(),
+				})
+				readyMsg.To = msg.From
+				c.send <- readyMsg
+			}
 		} else {
-			log.Printf("Claude still running, replayed %d events, goroutine will send new ones", len(events))
+			// Web UI 连接：回放全部 sessionEvents（支持断线重连恢复完整对话）
+			// 1. 先复制当前所有事件快照
+			c.sessionMu.Lock()
+			events := make([]protocol.Message, len(c.sessionEvents))
+			copy(events, c.sessionEvents)
+			snapshotLen := len(c.sessionEvents)
+			c.sentUpTo = snapshotLen
+			c.sessionMu.Unlock()
+
+			// 2. 回放快照事件（此时 setUser 还没调用，goroutine 不会发送）
+			for i := range events {
+				events[i].To = msg.From
+				c.send <- &events[i]
+			}
+
+			// 3. 发送快照期间新增的事件（必须在 setUser 之前，避免竞态）
+			c.sessionMu.Lock()
+			for i := snapshotLen; i < len(c.sessionEvents); i++ {
+				remaining := c.sessionEvents[i]
+				remaining.To = msg.From
+				c.send <- &remaining
+			}
+			c.sentUpTo = len(c.sessionEvents)
+			c.sessionMu.Unlock()
+
+			// 4. 设置用户 ID（在所有回放事件发送之后，此后 goroutine 可以发送新事件）
+			c.setUser(msg.From)
+
+			// 5. 如果 Claude 已完成，发送 chat_ready
+			if !c.claude.IsRunning() {
+				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+					SessionID: c.claude.SessionID(),
+				})
+				readyMsg.To = msg.From
+				c.send <- readyMsg
+				log.Printf("Sent chat_ready to reattached user (Claude idle, replayed %d events)", len(events))
+			} else {
+				log.Printf("Claude still running, replayed %d events, goroutine will send new ones", len(events))
+			}
 		}
 
 	case protocol.TypeDetach:
