@@ -67,6 +67,18 @@ func main() {
 	http.HandleFunc("/api/bot/chat", botHandler.HandleChat)
 	http.HandleFunc("/api/bot/clients", botHandler.HandleClients)
 
+	// 微信集成（内置 iLink 支持）
+	if config.WeChat.Enabled {
+		wechatMgr := server.NewWeChatManager(hub, auth, config.WeChat)
+		wechatHandler := server.NewWeChatHandler(wechatMgr, auth)
+		http.HandleFunc("/api/wechat/status", wechatHandler.HandleStatus)
+		http.HandleFunc("/api/wechat/qrcode/", wechatHandler.HandleQRCode)
+		http.HandleFunc("/api/wechat/relogin/", wechatHandler.HandleRelogin)
+		go wechatMgr.Start()
+		defer wechatMgr.Stop()
+		log.Println("WeChat integration enabled")
+	}
+
 	// 构建信息 API
 	http.HandleFunc("/api/build-info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

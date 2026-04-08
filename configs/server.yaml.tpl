@@ -27,3 +27,13 @@ logging:
   file: "/var/log/claude-forward/server.log"  # 日志文件路径
   max_days: 7                         # 日志保留天数
   log_level: "info"                   # 日志级别: debug, info, warn, error
+
+# 微信集成（内置 iLink Bot 支持）
+# 启用后 Server 直连 iLink API，无需单独运行 wechat-bridge
+# 扫码通过 Web UI 或 API 完成
+wechat:
+  enabled: false                      # 是否启用微信集成
+  data_dir: "wechat-data"             # 数据存储目录（session、bindings）
+  users:                              # 微信用户白名单路由（wechat_id → clawbot_id）
+    # - wechat_id: "wxid_xxx@im.wechat"  # 微信用户 ID（首次从日志获取）
+    #   clawbot_id: "my-macbook"          # 电脑级别 ID，对应 Client 的 clawbot_id

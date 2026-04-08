@@ -12,6 +12,7 @@ type Config struct {
 	Auth     AuthConfig     `yaml:"auth"`
 	Session  SessionConfig  `yaml:"session"`
 	Logging  LoggingConfig  `yaml:"logging"`
+	WeChat   WeChatConfig   `yaml:"wechat"`
 }
 
 // ServerConfig 服务器基础配置
@@ -72,6 +73,9 @@ func DefaultConfig() *Config {
 			MaxDays: 7,
 			LogLevel: "info",
 		},
+		WeChat: WeChatConfig{
+			DataDir: "wechat-data",
+		},
 	}
 }
 
@@ -88,4 +92,17 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return config, nil
+}
+
+// WeChatConfig 微信集成配置
+type WeChatConfig struct {
+	Enabled bool         `yaml:"enabled"`
+	DataDir string       `yaml:"data_dir"`
+	Users   []UserRoute  `yaml:"users"`
+}
+
+// UserRoute 微信用户 → 电脑 clawbot_id 路由
+type UserRoute struct {
+	WechatID  string `yaml:"wechat_id"`
+	ClawbotID string `yaml:"clawbot_id"`
 }
