@@ -98,6 +98,13 @@ func (bh *BotHandler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	// 先发送 attach 通知，客户端需要知道用户 ID 才会转发 Claude 回复
+	attachMsg := &protocol.Message{
+		Type: protocol.TypeAttach,
+		From: botConn.ID,
+	}
+	client.Send <- attachMsg
+
 	// 发送 chat_input
 	chatMsg, err := protocol.NewMessage(protocol.TypeChatInput, protocol.ChatInputPayload{
 		Text: req.Text,
@@ -112,6 +119,14 @@ func (bh *BotHandler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[BOT] Sent chat_input from %s to client %s (clawbot_id=%s)", botConn.ID, clientID, req.ClawbotID)
 
 	// SSE 流推送
+	// 结束时通知客户端 detach，清理 attachedUser
+	defer func() {
+		client.Send <- &protocol.Message{
+			Type: protocol.TypeDetach,
+			From: botConn.ID,
+		}
+	}()
+
 	flusher, canFlush := w.(http.Flusher)
 	timeout := time.NewTimer(5 * time.Minute)
 	defer timeout.Stop()
