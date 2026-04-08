@@ -472,6 +472,9 @@ func (c *Client) handleChatInput(userID string, text string) {
 		return c.attachedUser
 	}
 
+	// Bot API 使用全新会话（不 resume），不存 sessionEvents，不影响 Web UI
+	freshSession := strings.HasPrefix(userID, "bot-")
+
 	// 立即发送确认，让 UI 知道消息已被接收
 	ackMsg, _ := protocol.NewMessage(protocol.TypeChatAck, nil)
 	ackMsg.To = currentUserID()
@@ -487,7 +490,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 		return
 	}
 
-	if err := c.claude.SendMessage(text); err != nil {
+	if err := c.claude.SendMessage(text, freshSession); err != nil {
 		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
 			Code:    500,
 			Message: fmt.Sprintf("Failed to start Claude: %v", err),
@@ -498,7 +501,6 @@ func (c *Client) handleChatInput(userID string, text string) {
 	}
 
 	// 流式转发事件到用户
-	// 事件同时追加到 sessionEvents（Client 级别），即使 goroutine 退出也不丢失
 	for event := range c.claude.Stream() {
 		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 			EventType:                string(event.Type),
@@ -517,25 +519,32 @@ func (c *Client) handleChatInput(userID string, text string) {
 			ContextWindow:            event.ContextWindow,
 		})
 
-		// 追加到会话事件缓冲，并判断是否应该发送给用户
-		// 只有实际发送时才更新 sentUpTo，避免用户离线时标记为已发送导致回放跳过
 		uid := currentUserID()
-		c.sessionMu.Lock()
-		c.sessionEvents = append(c.sessionEvents, *msg)
-		myIndex := len(c.sessionEvents) - 1
-		shouldSend := myIndex >= c.sentUpTo
-		if shouldSend && uid != "" {
-			c.sentUpTo = len(c.sessionEvents)
-		}
-		// 持久化事件到磁盘（result 事件时保存，避免频繁 IO）
-		if event.Type == EventResult {
-			c.saveSessionEvents()
-		}
-		c.sessionMu.Unlock()
 
-		if uid != "" && shouldSend {
-			msg.To = uid
-			c.send <- msg
+		if freshSession {
+			// Bot API：直接发送，不存 sessionEvents
+			if uid != "" {
+				msg.To = uid
+				c.send <- msg
+			}
+		} else {
+			// Web UI：追加到会话事件缓冲，支持断线重连回放
+			c.sessionMu.Lock()
+			c.sessionEvents = append(c.sessionEvents, *msg)
+			myIndex := len(c.sessionEvents) - 1
+			shouldSend := myIndex >= c.sentUpTo
+			if shouldSend && uid != "" {
+				c.sentUpTo = len(c.sessionEvents)
+			}
+			if event.Type == EventResult {
+				c.saveSessionEvents()
+			}
+			c.sessionMu.Unlock()
+
+			if uid != "" && shouldSend {
+				msg.To = uid
+				c.send <- msg
+			}
 		}
 
 		// result 事件表示轮次结束，发送 chat_ready
@@ -548,7 +557,6 @@ func (c *Client) handleChatInput(userID string, text string) {
 				readyMsg.To = uid
 				c.send <- readyMsg
 			}
-			// 如果用户不在线，chat_ready 由 TypeAttach handler 在重连时发送
 		}
 	}
 }
