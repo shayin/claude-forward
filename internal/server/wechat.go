@@ -22,18 +22,18 @@ type wechatUserState struct {
 	// 微信会话绑定：发送消息的 wechatUserID → clientID
 	// 注意：一个 iLink bot 可能收到多个微信用户的消息（如果 bot 允许）
 	// 但在当前设计中，每个 bot 只服务于一个配置用户
-	Bindings    map[string]string // wechatUserID → clientID
+	Bindings      map[string]string // wechatUserID → clientID
 	TypingTickets map[string]string // wechatUserID → typingTicket
 
 	// 登录流程状态
-	QRPending   bool
-	QRToken     string
-	QRCodeURL   string
-	QRDeadline  time.Time
+	QRPending  bool
+	QRToken    string
+	QRCodeURL  string
+	QRDeadline time.Time
 
 	// 控制
-	stopCh     chan struct{}
-	stopped    bool
+	stopCh  chan struct{}
+	stopped bool
 }
 
 // WeChatManager 微信多用户管理器
@@ -56,11 +56,11 @@ func NewWeChatManager(hub *Hub, auth *Auth, cfg WeChatConfig) *WeChatManager {
 	users := make(map[string]*wechatUserState)
 	for i, route := range cfg.Users {
 		users[fmt.Sprintf("%d", i)] = &wechatUserState{
-			Route:       route,
-			Bot:         NewILinkBot(),
-			Bindings:    make(map[string]string),
+			Route:         route,
+			Bot:           NewILinkBot(),
+			Bindings:      make(map[string]string),
 			TypingTickets: make(map[string]string),
-			stopCh:      make(chan struct{}),
+			stopCh:        make(chan struct{}),
 		}
 	}
 
@@ -348,11 +348,11 @@ func (m *WeChatManager) handleMessage(idx string, user *wechatUserState, msg ILi
 
 // wechatChatResponse Hub 聊天响应
 type wechatChatResponse struct {
-	FullText string
+	FullText  string
 	ToolCalls []string
-	CostUSD  float64
-	IsError  bool
-	ErrorMsg string
+	CostUSD   float64
+	IsError   bool
+	ErrorMsg  string
 }
 
 // chatViaHub 通过 Hub 直接路由消息（不走 HTTP）
@@ -403,6 +403,7 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 
 	// 收集响应
 	result := &wechatChatResponse{}
+	hasStreamDelta := false
 	timeout := time.NewTimer(5 * time.Minute)
 	defer timeout.Stop()
 
@@ -422,11 +423,19 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 				switch payload.EventType {
 				case "stream_delta":
 					// 增量文本片段，累加
+					hasStreamDelta = true
 					result.FullText += payload.Text
 				case "text":
-					// 跳过：assistant 消息中的完整文本块，与 stream_delta 重复
+					// assistant 消息中的完整文本块
+					// 如果有 stream_delta 则跳过（避免重复），否则作为唯一文本源
+					if !hasStreamDelta {
+						result.FullText = payload.Text
+					}
 				case "result":
-					// 跳过：完整结果文本，stream_delta 已累加
+					// result 包含完整回复文本，仅在没有其他来源时使用
+					if !hasStreamDelta && result.FullText == "" {
+						result.FullText = payload.Text
+					}
 					result.CostUSD = payload.CostUSD
 				case "tool_start":
 					result.ToolCalls = append(result.ToolCalls, payload.ToolName)
@@ -480,7 +489,7 @@ func (m *WeChatManager) handleCommand(idx string, user *wechatUserState, fromUse
 			if user.Bindings[fromUser] == c.ID {
 				active = " ← 当前"
 			}
-			sb.WriteString(fmt.Sprintf("%d. %s [%s]%s\n", i+1, c.Name, c.ClawbotID, active))
+			fmt.Fprintf(&sb, "%d. %s [%s]%s\n", i+1, c.Name, c.ClawbotID, active)
 		}
 		sb.WriteString("\n切换: /switch <序号>")
 		sendReply(sb.String())
