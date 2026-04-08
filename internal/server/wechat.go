@@ -362,9 +362,9 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 		return nil, fmt.Errorf("client %s not found", clientID)
 	}
 
-	// 创建虚拟 bot 连接
+	// 创建虚拟 bot 连接（ID 以 "bot-" 开头，让 Client 识别为 Bot API）
 	botConn := &Connection{
-		ID:   "wechat-" + uuid.New().String(),
+		ID:   "bot-wechat-" + uuid.New().String(),
 		Type: ConnTypeUser,
 		Send: make(chan *protocol.Message, 256),
 	}
@@ -420,9 +420,13 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 					continue
 				}
 				switch payload.EventType {
-				case "text", "stream_delta":
+				case "stream_delta":
+					// 增量文本片段，累加
 					result.FullText += payload.Text
+				case "text":
+					// 跳过：assistant 消息中的完整文本块，与 stream_delta 重复
 				case "result":
+					// 跳过：完整结果文本，stream_delta 已累加
 					result.CostUSD = payload.CostUSD
 				case "tool_start":
 					result.ToolCalls = append(result.ToolCalls, payload.ToolName)
