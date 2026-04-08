@@ -74,6 +74,10 @@ func main() {
 	// 等待信号
 	<-sigChan
 	log.Println("Shutting down client...")
+
+	// 先清理 tmux session，防止第二次 Ctrl+C 跳过清理导致残留
+	killTmuxSession(config.Tmux.SessionName)
+
 	c.Shutdown()
 
 	// 第二次 Ctrl+C 直接退出
@@ -81,9 +85,6 @@ func main() {
 		<-sigChan
 		os.Exit(0)
 	}()
-
-	// 清理 tmux session
-	killTmuxSession(config.Tmux.SessionName)
 }
 
 // tmuxAvailable 检查 tmux 是否可用且指定 session 已存在
