@@ -157,15 +157,26 @@ func main() {
 			// 检查是否有粘性会话
 			session := bridge.GetSession(fromUser)
 			if session == nil || session.ClawbotID != clawbotID {
-				// 新会话或 clawbot_id 变更，自动选择第一个 Client
+				// 没有绑定会话：列出可用客户端，提示用户选择
 				clients, err := bridge.ClientsByClawbot(clawbotID)
 				if err != nil || len(clients) == 0 {
 					sendReply(fmt.Sprintf("❌ 电脑 %q 上没有在线的 Client", clawbotID))
 					continue
 				}
-				bridge.SetSession(fromUser, clawbotID, clients[0].ID)
-				session = bridge.GetSession(fromUser)
-				log.Printf("[SESSION] 新会话: %s → clawbot=%s, client=%s", fromUser, clawbotID, clients[0].ID)
+				var sb strings.Builder
+				sb.WriteString("请先选择要使用的客户端：\n")
+				for i, c := range clients {
+					sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, c.Name))
+				}
+				sb.WriteString("\n回复 /switch <序号> 选择")
+				sendReply(sb.String())
+				continue
+			}
+
+			// 检查绑定的客户端是否在线
+			if !bridge.IsClientOnline(session.ClientID) {
+				sendReply(fmt.Sprintf("❌ 客户端已离线，请等待重新上线或用 /clients /switch 切换"))
+				continue
 			}
 
 			// 显示"正在输入"

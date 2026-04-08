@@ -1025,6 +1025,11 @@
     <!-- Client List View -->
     <div id="clientListView" class="view">
         <div class="client-list-container">
+            <div id="clientOfflineBanner" style="display:none; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; text-align: center;">
+                <div style="font-weight: 600; color: #92400e; margin-bottom: 4px;">客户端离线</div>
+                <div style="color: #a16207; font-size: 13px;" id="offlineClientName"></div>
+                <div style="color: #a16207; font-size: 12px; margin-top: 4px;">等待客户端重新上线后将自动连接</div>
+            </div>
             <div class="client-list-title">可用客户端</div>
             <div id="clients"></div>
         </div>
@@ -1079,6 +1084,8 @@
         let currentSessionID = null;     // 当前 Claude 会话 ID
         let historyBackup = null;        // 重连前的历史备份
         let replayEventCount = 0;        // attached 后收到的回放事件数
+        let waitingForClient = null;     // 等待重连的客户端 ID
+        let pollTimer = null;            // 客户端上线轮询定时器
 
         // === Chat History Persistence ===
         function saveHistory() {
@@ -1255,8 +1262,11 @@
 
             ws.onclose = () => {
                 updateStatus('', '连接已断开');
-                if (attachedClient) {
-                    localStorage.setItem('cf_attached_client', attachedClient);
+                stopPollingForClient();
+                if (attachedClient || waitingForClient) {
+                    if (attachedClient) {
+                        localStorage.setItem('cf_attached_client', attachedClient);
+                    }
                     isReconnecting = true;
                     showReconnect();
                     showDebug('连接断开，3s 后重连');
@@ -1286,6 +1296,10 @@
                     break;
                 case 'attached':
                     localStorage.setItem('cf_attached_client', attachedClient);
+                    // 清除等待状态
+                    waitingForClient = null;
+                    stopPollingForClient();
+                    document.getElementById('clientOfflineBanner').style.display = 'none';
                     showView('chatView');
                     document.getElementById('headerActions').style.display = 'flex';
                     // 重置所有流式状态，避免断线重连后 isStreaming 卡在 true
@@ -1304,12 +1318,16 @@
                     historyBackup = chatHistory.length > 0 ? [...chatHistory] : null;
                     break;
                 case 'detached':
+                    // 客户端主动断开：保留绑定记录，进入等待状态
+                    waitingForClient = attachedClient;
                     attachedClient = null;
                     isReconnecting = false;
-                    localStorage.removeItem('cf_attached_client');
                     document.getElementById('headerActions').style.display = 'none';
                     showView('clientListView');
+                    document.getElementById('clientOfflineBanner').style.display = 'block';
+                    document.getElementById('offlineClientName').textContent = '客户端: ' + (waitingForClient || '未知');
                     sendMessage({ type: 'list' });
+                    startPollingForClient();
                     break;
                 case 'chat_message':
                     replayEventCount++;
@@ -1354,11 +1372,14 @@
                     break;
                 case 'error':
                     if (msg.payload?.message?.includes('not found')) {
-                        localStorage.removeItem('cf_attached_client');
-                        attachedClient = null;
+                        // 客户端离线：保留绑定记录，进入等待状态
+                        waitingForClient = attachedClient;
                         isReconnecting = false;
-                        // attach 失败（客户端已断开），回退到客户端列表
+                        showView('clientListView');
+                        document.getElementById('clientOfflineBanner').style.display = 'block';
+                        document.getElementById('offlineClientName').textContent = '客户端: ' + (waitingForClient || '未知');
                         sendMessage({ type: 'list' });
+                        startPollingForClient();
                     }
                     addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
                     break;
@@ -1488,12 +1509,43 @@
             document.getElementById(viewId).classList.add('active');
         }
 
+        // 轮询等待客户端上线
+        function startPollingForClient() {
+            stopPollingForClient();
+            pollTimer = setInterval(() => {
+                if (waitingForClient && ws && ws.readyState === WebSocket.OPEN) {
+                    sendMessage({ type: 'list' });
+                } else {
+                    stopPollingForClient();
+                }
+            }, 5000);
+        }
+
+        function stopPollingForClient() {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+
         function showClients(clients) {
             const container = document.getElementById('clients');
             if (!clients || clients.length === 0) {
                 container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128187;</div><h2>没有可用的客户端</h2><p>请确保本地客户端已启动</p></div>';
                 return;
             }
+
+            // 如果在等待客户端重连，检查是否已上线
+            if (waitingForClient) {
+                const found = clients.find(c => c.id === waitingForClient);
+                if (found) {
+                    showDebug('等待的客户端已上线，自动 attach: ' + waitingForClient);
+                    attachedClient = waitingForClient;
+                    sendMessage({ type: 'attach', payload: { client_id: waitingForClient } });
+                    return;
+                }
+            }
+
             container.innerHTML = clients.map(c => `
                 <div class="client-item ${attachedClient === c.id ? 'active' : ''}" onclick="attach('${c.id}')">
                     <div class="client-icon">&#128187;</div>
@@ -1646,8 +1698,11 @@
             sendMessage({ type: 'detach' });
             resetChat(); // 先清空历史（依赖 attachedClient 定位 localStorage key）
             attachedClient = null;
+            waitingForClient = null;
+            stopPollingForClient();
             isReconnecting = false;
             localStorage.removeItem('cf_attached_client');
+            document.getElementById('clientOfflineBanner').style.display = 'none';
             document.getElementById('headerActions').style.display = 'none';
             hideReconnect();
         }

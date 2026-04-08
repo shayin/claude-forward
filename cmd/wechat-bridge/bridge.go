@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shayin/claude-forward/internal/protocol"
@@ -15,10 +19,12 @@ import (
 
 // Bridge Claude Forward Server Bot API 客户端
 type Bridge struct {
-	ServerURL string
-	Token     string
-	Client    *http.Client
-	sessions  map[string]*userSession // wechatUserID → session
+	ServerURL   string
+	Token       string
+	Client      *http.Client
+	sessions    map[string]*userSession // wechatUserID → session
+	sessionFile string                   // 持久化文件路径
+	mu          sync.Mutex               // 保护 sessions 的并发访问
 }
 
 // userSession 微信用户的会话状态
@@ -30,12 +36,15 @@ type userSession struct {
 
 // NewBridge 创建 Bridge 客户端
 func NewBridge(serverURL, token string) *Bridge {
-	return &Bridge{
-		ServerURL: strings.TrimSuffix(serverURL, "/"),
-		Token:     token,
-		Client:    &http.Client{Timeout: 5 * time.Minute},
-		sessions:  make(map[string]*userSession),
+	b := &Bridge{
+		ServerURL:   strings.TrimSuffix(serverURL, "/"),
+		Token:       token,
+		Client:      &http.Client{Timeout: 5 * time.Minute},
+		sessions:    make(map[string]*userSession),
+		sessionFile: "sessions.json",
 	}
+	b.loadSessions()
+	return b
 }
 
 // ChatResponse SSE 流返回的完整回复
@@ -56,16 +65,67 @@ type chatRequest struct {
 
 // GetSession 获取用户会话
 func (b *Bridge) GetSession(wechatUserID string) *userSession {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.sessions[wechatUserID]
 }
 
 // SetSession 设置用户会话
 func (b *Bridge) SetSession(wechatUserID, clawbotID, clientID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.sessions[wechatUserID] = &userSession{
 		ClawbotID:  clawbotID,
 		ClientID:   clientID,
 		LastActive: time.Now(),
 	}
+	b.saveSessionsLocked()
+}
+
+// loadSessions 从文件加载会话
+func (b *Bridge) loadSessions() {
+	data, err := os.ReadFile(b.sessionFile)
+	if err != nil {
+		return
+	}
+	var sessions map[string]*userSession
+	if err := json.Unmarshal(data, &sessions); err != nil {
+		return
+	}
+	b.mu.Lock()
+	b.sessions = sessions
+	b.mu.Unlock()
+	log.Printf("[SESSION] 从 %s 恢复了 %d 个会话", b.sessionFile, len(sessions))
+}
+
+// saveSessionsLocked 持久化会话到文件（调用方需持有锁）
+func (b *Bridge) saveSessionsLocked() {
+	data, err := json.MarshalIndent(b.sessions, "", "  ")
+	if err != nil {
+		log.Printf("[SESSION] 序列化失败: %v", err)
+		return
+	}
+	dir := filepath.Dir(b.sessionFile)
+	if dir != "" && dir != "." {
+		os.MkdirAll(dir, 0755)
+	}
+	if err := os.WriteFile(b.sessionFile, data, 0644); err != nil {
+		log.Printf("[SESSION] 保存失败: %v", err)
+	}
+}
+
+// IsClientOnline 检查客户端是否在线
+func (b *Bridge) IsClientOnline(clientID string) bool {
+	clients, err := b.AllClients()
+	if err != nil {
+		return false
+	}
+	for _, c := range clients {
+		if c.ID == clientID {
+			return true
+		}
+	}
+	return false
 }
 
 // Chat 发送消息并等待完整回复
