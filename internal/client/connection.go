@@ -38,6 +38,9 @@ type Client struct {
 	sessionEvents []protocol.Message
 	sentUpTo      int         // 已发送到用户的事件索引（用于去重）
 	sessionMu     sync.Mutex  // 保护 sessionEvents 和 sentUpTo
+
+	// Bot API 独立会话（与 Web UI 隔离）
+	botSessionID string
 }
 
 // NewClient 创建客户端
@@ -379,14 +382,21 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		go c.handleChatInput(msg.From, payload.Text)
 
 	case protocol.TypeNewSession:
-		log.Printf("Starting new Claude session")
-		c.claude.Abort()
-		c.claude.ResetSession()
-		c.sessionMu.Lock()
-		c.sessionEvents = nil
-		c.sentUpTo = 0
-		c.saveSessionEvents()
-		c.sessionMu.Unlock()
+		if strings.HasPrefix(msg.From, "bot-") {
+			// Bot API：仅重置 Bot 自己的 session
+			log.Printf("Starting new Bot session")
+			c.botSessionID = ""
+		} else {
+			// Web UI：重置主会话和事件
+			log.Printf("Starting new Claude session")
+			c.claude.Abort()
+			c.claude.ResetSession()
+			c.sessionMu.Lock()
+			c.sessionEvents = nil
+			c.sentUpTo = 0
+			c.saveSessionEvents()
+			c.sessionMu.Unlock()
+		}
 
 	case protocol.TypePermissionResponse:
 		var payload protocol.PermissionResponsePayload
@@ -472,8 +482,14 @@ func (c *Client) handleChatInput(userID string, text string) {
 		return c.attachedUser
 	}
 
-	// Bot API 使用全新会话（不 resume），不存 sessionEvents，不影响 Web UI
-	freshSession := strings.HasPrefix(userID, "bot-")
+	// Bot API 使用独立 session（与 Web UI 隔离），不存 sessionEvents
+	isBot := strings.HasPrefix(userID, "bot-")
+	var resumeSessionID string
+	if isBot {
+		resumeSessionID = c.botSessionID
+	} else {
+		resumeSessionID = c.claude.SessionID()
+	}
 
 	// 立即发送确认，让 UI 知道消息已被接收
 	ackMsg, _ := protocol.NewMessage(protocol.TypeChatAck, nil)
@@ -490,7 +506,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 		return
 	}
 
-	if err := c.claude.SendMessage(text, freshSession); err != nil {
+	if err := c.claude.SendMessage(text, resumeSessionID); err != nil {
 		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
 			Code:    500,
 			Message: fmt.Sprintf("Failed to start Claude: %v", err),
@@ -502,6 +518,15 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 	// 流式转发事件到用户
 	for event := range c.claude.Stream() {
+		// 从事件中捕获 session_id，分别持久化
+		if event.SessionID != "" {
+			if isBot {
+				c.botSessionID = event.SessionID
+			} else {
+				c.claude.SetSessionID(event.SessionID)
+			}
+		}
+
 		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 			EventType:                string(event.Type),
 			Text:                     event.Text,
@@ -521,7 +546,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 		uid := currentUserID()
 
-		if freshSession {
+		if isBot {
 			// Bot API：直接发送，不存 sessionEvents
 			if uid != "" {
 				msg.To = uid

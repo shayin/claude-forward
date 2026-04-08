@@ -111,8 +111,8 @@ func (cm *ClaudeManager) IsRunning() bool {
 }
 
 // SendMessage 发送消息给 Claude，启动一个 claude -p 子进程
-// freshSession 为 true 时不使用 --resume，启动全新会话且不保存 session_id
-func (cm *ClaudeManager) SendMessage(text string, freshSession bool) error {
+// resumeSessionID 非空时使用 --resume 续接该会话，为空则启动全新会话
+func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error {
 	cm.mu.Lock()
 	if cm.running {
 		cm.mu.Unlock()
@@ -127,12 +127,8 @@ func (cm *ClaudeManager) SendMessage(text string, freshSession bool) error {
 	// 构建命令参数
 	args := []string{"-p", text, "--output-format", "stream-json", "--verbose"}
 
-	if !freshSession {
-		cm.mu.Lock()
-		if cm.sessionID != "" {
-			args = append(args, "--resume", cm.sessionID)
-		}
-		cm.mu.Unlock()
+	if resumeSessionID != "" {
+		args = append(args, "--resume", resumeSessionID)
 	}
 
 	if cm.config.AllowedTools != "" {
@@ -207,10 +203,7 @@ func (cm *ClaudeManager) SendMessage(text string, freshSession bool) error {
 
 			events := parseJSONLLine(line)
 			for _, event := range events {
-				// 捕获 session_id（freshSession 时不保存，避免覆盖 Web UI 的会话）
-				if event.SessionID != "" && !freshSession {
-					cm.SetSessionID(event.SessionID)
-				}
+				// session_id 随事件传递，由调用方决定如何持久化
 
 				select {
 				case cm.events <- event:
