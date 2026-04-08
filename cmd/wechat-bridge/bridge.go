@@ -126,7 +126,7 @@ func (b *Bridge) Chat(wechatUserID, text string) (*ChatResponse, error) {
 			case "text", "stream_delta":
 				result.FullText += payload.Text
 			case "result":
-				result.FullText += payload.Text
+				// result.Text 是完整回复，不累加（stream_delta 已累加）
 				result.CostUSD = payload.CostUSD
 			case "tool_start":
 				result.ToolCalls = append(result.ToolCalls, payload.ToolName)
