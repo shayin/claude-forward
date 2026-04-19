@@ -378,9 +378,11 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 	defer m.hub.DetachUser(botConn.ID)
 
 	// 发送 attach 通知
-	client.Send <- &protocol.Message{
+	if !safeSend(client.Send, &protocol.Message{
 		Type: protocol.TypeAttach,
 		From: botConn.ID,
+	}) {
+		return nil, fmt.Errorf("client disconnected before attach")
 	}
 
 	// 发送 chat_input
@@ -391,14 +393,16 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 		return nil, err
 	}
 	chatMsg.From = botConn.ID
-	client.Send <- chatMsg
+	if !safeSend(client.Send, chatMsg) {
+		return nil, fmt.Errorf("client disconnected before chat")
+	}
 
 	// 结束时 detach
 	defer func() {
-		client.Send <- &protocol.Message{
+		safeSend(client.Send, &protocol.Message{
 			Type: protocol.TypeDetach,
 			From: botConn.ID,
-		}
+		})
 	}()
 
 	// 收集响应
@@ -623,6 +627,13 @@ func (m *WeChatManager) loadBindings(idx string, user *wechatUserState) {
 }
 
 // --- 工具函数 ---
+
+// safeSend 安全发送消息到 channel，避免向已关闭 channel 写入导致 panic
+func safeSend(ch chan *protocol.Message, msg *protocol.Message) bool {
+	defer func() { recover() }()
+	ch <- msg
+	return true
+}
 
 func truncateStr(s string, n int) string {
 	if len(s) <= n {
