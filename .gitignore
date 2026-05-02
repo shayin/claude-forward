@@ -50,4 +50,4 @@ certs/
 .claude/
 
 # WeChat bridge (external)
-wechat-bridge/
+wechat-bridge
