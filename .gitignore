@@ -45,3 +45,9 @@ configs/wechat-bridge.yaml
 
 # Generated certificates
 certs/
+
+# Claude Code config
+.claude/
+
+# WeChat bridge (external)
+wechat-bridge/
