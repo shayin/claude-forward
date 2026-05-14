@@ -456,12 +456,12 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 				return result, nil
 			}
 
-			timeout.Reset(5 * time.Minute)
+			timeout.Reset(15 * time.Minute)
 
 		case <-timeout.C:
 			return nil, fmt.Errorf("chat timeout")
 
-		case <-time.After(6 * time.Minute):
+		case <-time.After(20 * time.Minute):
 			return nil, fmt.Errorf("chat timeout (hard)")
 		}
 	}
