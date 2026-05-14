@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Claude Forward</title>
+    <script>(function(){var t=localStorage.getItem('cf_theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.setAttribute('data-theme','dark')}})();</script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -65,6 +66,85 @@
             /* Transition */
             --transition-fast:   150ms cubic-bezier(0.4, 0, 0.2, 1);
             --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* === Dark Theme === */
+        [data-theme="dark"] {
+            /* Surface */
+            --bg-page:          #141211;
+            --bg-surface:       #1E1C1A;
+            --bg-sunken:        #2A2724;
+
+            /* Text */
+            --text-primary:     #EDE8E0;
+            --text-secondary:   #A39E96;
+            --text-tertiary:    #736E67;
+            --text-placeholder: #524E48;
+
+            /* Accent — 保持暖色调 */
+            --accent-primary:   #D4784E;
+            --accent-primary-hover: #E08A60;
+            --accent-secondary: #5BA3D9;
+            --accent-green:     #4DAF7A;
+            --accent-amber:     #D4963A;
+
+            /* Border */
+            --border-default:   #3A3632;
+            --border-subtle:    #2E2B28;
+            --border-strong:    #4A4540;
+
+            /* Semantic */
+            --user-bubble-bg:   #C96442;
+            --user-bubble-text: #FFFFFF;
+            --assistant-bubble-bg: #242220;
+            --assistant-bubble-text: #EDE8E0;
+            --thinking-bg:      #221E1A;
+            --thinking-border:  #3D3228;
+            --thinking-text:    #A08E7A;
+            --tool-bg:          #1E1C1A;
+            --tool-border:      #3A3632;
+            --tool-header-bg:   #262422;
+            --tool-name-color:  #5BA3D9;
+            --tool-output-bg:   #111010;
+            --tool-output-text: #B8B2A8;
+            --status-connected: #4DAF7A;
+            --status-connecting:#D4963A;
+            --status-error:     #D95555;
+
+            /* Shadow */
+            --shadow-sm:  0 1px 2px rgba(0,0,0,0.25);
+            --shadow-md:  0 2px 8px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.2);
+            --shadow-lg:  0 4px 16px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        [data-theme="dark"] .form-group input {
+            background: var(--bg-sunken);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .form-group input:focus {
+            border-color: var(--accent-secondary);
+            box-shadow: 0 0 0 3px rgba(91,163,217,0.15);
+        }
+        [data-theme="dark"] .message.assistant .bubble code {
+            background: var(--bg-sunken);
+            color: var(--accent-primary);
+        }
+        [data-theme="dark"] .permission-overlay {
+            background: rgba(0,0,0,0.7);
+        }
+        [data-theme="dark"] .permission-input-preview {
+            background: var(--bg-sunken);
+            border-color: var(--border-default);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .btn-deny {
+            background: var(--bg-sunken);
+            color: var(--text-secondary);
+            border-color: var(--border-default);
+        }
+        [data-theme="dark"] .status-dot.connected {
+            box-shadow: 0 0 0 2px rgba(77,175,122,0.2);
         }
 
         body {
@@ -149,6 +229,23 @@
         }
 
         .header-actions { display: flex; gap: 8px; }
+
+        .btn-theme {
+            background: none;
+            border: none;
+            color: var(--text-tertiary);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: var(--radius-sm);
+            transition: all var(--transition-fast);
+            -webkit-tap-highlight-color: transparent;
+            line-height: 1;
+        }
+        .btn-theme:hover {
+            color: var(--accent-primary);
+            background: var(--bg-sunken);
+        }
 
         .btn-ghost {
             background: none;
@@ -993,6 +1090,7 @@
             <span class="status-dot" id="statusDot"></span>
             <span id="statusText">未连接</span>
         </div>
+        <button class="btn-theme" id="themeToggle" onclick="toggleTheme()" title="切换主题">&#9790;</button>
         <div class="header-actions" id="headerActions" style="display:none;">
             <button class="btn-ghost" onclick="newSession()">新会话</button>
             <button class="btn-ghost danger" onclick="detach()">断开</button>
@@ -1025,10 +1123,10 @@
     <!-- Client List View -->
     <div id="clientListView" class="view">
         <div class="client-list-container">
-            <div id="clientOfflineBanner" style="display:none; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; text-align: center;">
-                <div style="font-weight: 600; color: #92400e; margin-bottom: 4px;">客户端离线</div>
-                <div style="color: #a16207; font-size: 13px;" id="offlineClientName"></div>
-                <div style="color: #a16207; font-size: 12px; margin-top: 4px;">等待客户端重新上线后将自动连接</div>
+            <div id="clientOfflineBanner" style="display:none; background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; text-align: center;">
+                <div style="font-weight: 600; color: var(--accent-amber); margin-bottom: 4px;">客户端离线</div>
+                <div style="color: var(--thinking-text); font-size: 13px;" id="offlineClientName"></div>
+                <div style="color: var(--thinking-text); font-size: 12px; margin-top: 4px;">等待客户端重新上线后将自动连接</div>
             </div>
             <div class="client-list-title">可用客户端</div>
             <div id="clients"></div>
@@ -1148,6 +1246,32 @@
         }
 
         // === Init ===
+        function initTheme() {
+            const btn = document.getElementById('themeToggle');
+            updateThemeIcon();
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            if (isDark) {
+                html.removeAttribute('data-theme');
+                localStorage.setItem('cf_theme', 'light');
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                localStorage.setItem('cf_theme', 'dark');
+            }
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const btn = document.getElementById('themeToggle');
+            if (!btn) return;
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            btn.innerHTML = isDark ? '&#9728;' : '&#9790;';
+            btn.title = isDark ? '切换亮色模式' : '切换暗色模式';
+        }
+
         function init() {
             const params = new URLSearchParams(window.location.search);
             const server = params.get('server') || localStorage.getItem('cf_server') || '';
@@ -1903,6 +2027,7 @@
         }
 
         // === Start ===
+        initTheme();
         init();
         loadBuildInfo();
         setupVisibilityHandling();
