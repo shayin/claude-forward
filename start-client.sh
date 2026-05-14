@@ -81,6 +81,7 @@ build() {
     # 同步到已安装的位置
     INSTALLED="$HOME/.claude-forward/client"
     if [ -f "$INSTALLED" ]; then
+        rm -f "$INSTALLED"
         cp "$BINARY" "$INSTALLED"
         print_step "已同步到 $INSTALLED"
     fi
