@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shayin/claude-forward/internal/protocol"
 	"github.com/shayin/claude-forward/internal/server"
 )
 
@@ -42,7 +43,14 @@ func main() {
 	// 初始化组件
 	hub := server.NewHub()
 	auth := server.NewAuth(config.Auth.Tokens)
-	handler := server.NewHandler(hub, auth)
+
+	// 加密密钥
+	var encryptionKey []byte
+	if config.Server.EncryptionKey != "" {
+		encryptionKey = protocol.DeriveKey(config.Server.EncryptionKey)
+		log.Printf("Application-layer encryption enabled")
+	}
+	handler := server.NewHandler(hub, auth, encryptionKey)
 
 	// 启动 Hub
 	go hub.Run()

@@ -19,6 +19,7 @@ import (
 // Client 客户端
 type Client struct {
 	config        *Config
+	encryptionKey []byte // 应用层加密密钥
 	conn          *websocket.Conn
 	send          chan *protocol.Message
 	tmux          *TmuxManager
@@ -61,6 +62,11 @@ func (c *Client) Connect() error {
 
 	// 重置连接关闭标志（用于重连场景）
 	atomic.StoreInt32(&c.connClosed, 0)
+
+	// 初始化加密密钥
+	if c.config.Server.EncryptionKey != "" {
+		c.encryptionKey = protocol.DeriveKey(c.config.Server.EncryptionKey)
+	}
 
 	// 构建 WebSocket URL
 	url := c.config.Server.URL
@@ -200,7 +206,14 @@ func (c *Client) readPump() {
 			continue
 		}
 
-		c.handleMessage(&msg)
+		// 应用层解密
+		decrypted, err := protocol.DecryptMessage(c.encryptionKey, &msg)
+		if err != nil {
+			log.Printf("Decrypt error: %v", err)
+			continue
+		}
+
+		c.handleMessage(decrypted)
 	}
 }
 
@@ -235,7 +248,14 @@ func (c *Client) writePump() {
 				return
 			}
 
-			data, err := json.Marshal(msg)
+			// 应用层加密
+			encrypted, err := protocol.EncryptMessage(c.encryptionKey, msg)
+			if err != nil {
+				log.Printf("Encrypt error (fatal): %v", err)
+				return
+			}
+
+			data, err := json.Marshal(encrypted)
 			if err != nil {
 				log.Printf("JSON marshal error: %v", err)
 				continue

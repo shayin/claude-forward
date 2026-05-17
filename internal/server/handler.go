@@ -21,15 +21,17 @@ var upgrader = websocket.Upgrader{
 
 // Handler WebSocket 处理器
 type Handler struct {
-	hub  *Hub
-	auth *Auth
+	hub           *Hub
+	auth          *Auth
+	encryptionKey []byte // 应用层加密密钥（nil 表示不加密）
 }
 
 // NewHandler 创建处理器
-func NewHandler(hub *Hub, auth *Auth) *Handler {
+func NewHandler(hub *Hub, auth *Auth, encryptionKey []byte) *Handler {
 	return &Handler{
-		hub:  hub,
-		auth: auth,
+		hub:           hub,
+		auth:          auth,
+		encryptionKey: encryptionKey,
 	}
 }
 
@@ -93,7 +95,14 @@ func (h *Handler) readPump(conn *Connection) {
 			continue
 		}
 
-		h.handleMessage(conn, &msg)
+		// 应用层解密
+		decrypted, err := protocol.DecryptMessage(h.encryptionKey, &msg)
+		if err != nil {
+			log.Printf("Decrypt error: %v", err)
+			continue
+		}
+
+		h.handleMessage(conn, decrypted)
 	}
 }
 
@@ -114,7 +123,14 @@ func (h *Handler) writePump(conn *Connection) {
 				return
 			}
 
-			data, err := json.Marshal(msg)
+			// 应用层加密
+			encrypted, err := protocol.EncryptMessage(h.encryptionKey, msg)
+			if err != nil {
+				log.Printf("Encrypt error (fatal): %v", err)
+				return
+			}
+
+			data, err := json.Marshal(encrypted)
 			if err != nil {
 				log.Printf("JSON marshal error: %v", err)
 				continue

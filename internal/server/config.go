@@ -17,9 +17,10 @@ type Config struct {
 
 // ServerConfig 服务器基础配置
 type ServerConfig struct {
-	Host string    `yaml:"host"`
-	Port int       `yaml:"port"`
-	TLS  TLSConfig `yaml:"tls"`
+	Host          string    `yaml:"host"`
+	Port          int       `yaml:"port"`
+	EncryptionKey string    `yaml:"encryption_key"`
+	TLS           TLSConfig `yaml:"tls"`
 }
 
 // TLSConfig TLS 配置
