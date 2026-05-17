@@ -40,4 +40,20 @@
 
 **问题**: Web UI 只有亮色主题，晚上使用刺眼。
 
-**状态**: 待实现。
+**状态**: 已完成。
+
+---
+
+## 4. 客户端与服务器通信加密
+
+**问题**: Client 与 Server 之间的 WebSocket 通信是明文，经过网关/代理时可被嗅探，暴露聊天内容和代码等隐私。
+
+**建议方案**:
+- 方案 A: WSS（TLS）— 服务端配置证书，Client 连接改为 `wss://`，最标准但需要证书管理
+- 方案 B: 应用层加密 — 在 WebSocket 之上做端到端加密（如 AES-GCM），不依赖 TLS，自托管场景更灵活
+- 方案 C: WSS + 应用层加密双重保护
+
+**涉及文件**:
+- `internal/server/server.go` — 服务端 WebSocket 升级，支持 TLS
+- `internal/client/client.go` — 客户端 WebSocket 连接
+- `configs/server.yaml` / `configs/client.yaml` — 证书/密钥配置

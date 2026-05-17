@@ -301,11 +301,13 @@ func (hs *HookServer) loadUserSettings() map[string]any {
 
 	// 保留关键配置项
 	preserveKeys := []string{
-		"env",         // API 认证、Base URL、模型配置
-		"model",       // 默认模型
-		"language",    // 语言设置
-		"apiProvider",  // API 提供商
-		"mcpServers",   // MCP 服务器配置
+		"env",                        // API 认证、Base URL、模型配置
+		"model",                      // 默认模型
+		"language",                   // 语言设置
+		"apiProvider",                // API 提供商
+		"mcpServers",                 // MCP 服务器配置
+		"enabledPlugins",             // 插件配置（Skills 来源）
+		"enableAllProjectMcpServers", // 启用项目级 MCP 服务器（插件 MCP 依赖）
 	}
 
 	for _, key := range preserveKeys {
