@@ -97,9 +97,10 @@ func LoadConfig(path string) (*Config, error) {
 
 // WeChatConfig 微信集成配置
 type WeChatConfig struct {
-	Enabled bool         `yaml:"enabled"`
-	DataDir string       `yaml:"data_dir"`
-	Users   []UserRoute  `yaml:"users"`
+	Enabled    bool         `yaml:"enabled"`
+	DataDir    string       `yaml:"data_dir"`
+	PushSecret string       `yaml:"push_secret"`
+	Users      []UserRoute  `yaml:"users"`
 }
 
 // UserRoute 微信用户 → 电脑 clawbot_id 路由

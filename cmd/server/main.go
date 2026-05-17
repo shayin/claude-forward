@@ -82,6 +82,10 @@ func main() {
 		http.HandleFunc("/api/wechat/status", wechatHandler.HandleStatus)
 		http.HandleFunc("/api/wechat/qrcode/", wechatHandler.HandleQRCode)
 		http.HandleFunc("/api/wechat/relogin/", wechatHandler.HandleRelogin)
+		if config.WeChat.PushSecret != "" {
+			http.HandleFunc("/api/wechat/push", wechatHandler.HandlePush)
+			log.Println("WeChat Push API enabled")
+		}
 		go wechatMgr.Start()
 		defer wechatMgr.Stop()
 		log.Println("WeChat integration enabled")

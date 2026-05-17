@@ -31,6 +31,9 @@ type wechatUserState struct {
 	QRCodeURL  string
 	QRDeadline time.Time
 
+	// Push 离线队列
+	PushQueue []pushQueueItem
+
 	// 控制
 	stopCh  chan struct{}
 	stopped bool
@@ -76,6 +79,9 @@ func NewWeChatManager(hub *Hub, auth *Auth, cfg WeChatConfig) *WeChatManager {
 // Start 启动所有微信用户会话
 func (m *WeChatManager) Start() {
 	for idx, user := range m.users {
+		// 加载离线队列
+		m.loadPushQueue(idx, user)
+
 		// 尝试加载已保存的 session
 		session := m.loadSession(idx)
 		if session != nil {
@@ -84,6 +90,8 @@ func (m *WeChatManager) Start() {
 			if user.Bot.ValidateSession() {
 				user.LoginResult = session
 				log.Printf("[WECHAT] 用户 %s (%s) 恢复登录成功", idx, user.Route.WechatID)
+				// 投递离线队列
+				m.flushPushQueue(idx, user)
 				go m.pollLoop(idx, user)
 				continue
 			}
@@ -170,6 +178,9 @@ func (m *WeChatManager) StartQRLogin(idx string) (*ILinkQRStartResult, error) {
 
 		m.saveSession(idx, result)
 		log.Printf("[WECHAT] 用户 %s (%s) 登录成功 BotID=%s", idx, user.Route.WechatID, result.BotID)
+
+		// 投递离线队列
+		m.flushPushQueue(idx, user)
 
 		// 启动消息轮询
 		go m.pollLoop(idx, user)
@@ -661,4 +672,145 @@ func splitMessage(text string, chunkSize int) []string {
 		}
 	}
 	return chunks
+}
+
+// --- Push API ---
+
+// pushQueueItem Push 离线队列条目
+type pushQueueItem struct {
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// PushMessage 向指定微信用户推送消息
+// 返回 "sent" 表示立即发送成功，"queued" 表示已入队等待登录后发送
+func (m *WeChatManager) PushMessage(wechatID, text string) (string, error) {
+	m.mu.Lock()
+
+	// 查找 wechat_id 对应的 user state
+	var foundIdx string
+	var foundUser *wechatUserState
+	for idx, user := range m.users {
+		if user.Route.WechatID == wechatID {
+			foundIdx = idx
+			foundUser = user
+			break
+		}
+	}
+
+	if foundUser == nil {
+		m.mu.Unlock()
+		return "", fmt.Errorf("wechat_id %q not in config", wechatID)
+	}
+
+	// 未登录：入队（持锁操作，无网络 IO）
+	if foundUser.LoginResult == nil {
+		foundUser.PushQueue = append(foundUser.PushQueue, pushQueueItem{
+			Text:      text,
+			CreatedAt: time.Now(),
+		})
+		m.savePushQueue(foundIdx, foundUser)
+		log.Printf("[PUSH] 消息已入队 to=%s queue_len=%d", wechatID, len(foundUser.PushQueue))
+		m.mu.Unlock()
+		return "queued", nil
+	}
+
+	// 已登录：提取需要的信息后释放锁，再执行网络 IO
+	bot := foundUser.Bot
+	chunks := splitMessage(text, 4000)
+	m.mu.Unlock()
+
+	// 在锁外执行网络发送
+	sentCount := 0
+	for i, chunk := range chunks {
+		if err := bot.SendMessage(wechatID, chunk, ""); err != nil {
+			log.Printf("[PUSH] 发送失败 to=%s chunk=%d/%d: %v，剩余入队", wechatID, i+1, len(chunks), err)
+			// 发送失败，将剩余未发送内容入队
+			remaining := strings.Join(chunks[i:], "")
+			m.mu.Lock()
+			foundUser.PushQueue = append(foundUser.PushQueue, pushQueueItem{
+				Text:      remaining,
+				CreatedAt: time.Now(),
+			})
+			m.savePushQueue(foundIdx, foundUser)
+			m.mu.Unlock()
+			return "queued", nil
+		}
+		sentCount++
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	log.Printf("[PUSH] 消息已发送 to=%s len=%d chunks=%d", wechatID, len(text), sentCount)
+	return "sent", nil
+}
+
+// flushPushQueue 投递离线队列中的消息
+func (m *WeChatManager) flushPushQueue(idx string, user *wechatUserState) {
+	if len(user.PushQueue) == 0 {
+		return
+	}
+
+	log.Printf("[PUSH] 投递离线队列 user=%s count=%d", idx, len(user.PushQueue))
+
+	for i, item := range user.PushQueue {
+		chunks := splitMessage(item.Text, 4000)
+		for _, chunk := range chunks {
+			if err := user.Bot.SendMessage(user.Route.WechatID, chunk, ""); err != nil {
+				log.Printf("[PUSH] 投递失败 [user=%s, item=%d]: %v", idx, i, err)
+				// 发送失败，保留剩余消息
+				user.PushQueue = user.PushQueue[i:]
+				m.savePushQueue(idx, user)
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	// 全部发送成功，清空队列
+	user.PushQueue = nil
+	m.savePushQueue(idx, user)
+	log.Printf("[PUSH] 离线队列已清空 user=%s", idx)
+}
+
+// savePushQueue 持久化 Push 队列
+func (m *WeChatManager) savePushQueue(idx string, user *wechatUserState) {
+	dir := m.userDir(idx)
+	os.MkdirAll(dir, 0755)
+
+	data, err := json.MarshalIndent(user.PushQueue, "", "  ")
+	if err != nil {
+		log.Printf("[WECHAT] 序列化 push queue 失败: %v", err)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, "push_queue.json"), data, 0600); err != nil {
+		log.Printf("[WECHAT] 保存 push queue 失败: %v", err)
+	}
+}
+
+// loadPushQueue 加载 Push 队列
+func (m *WeChatManager) loadPushQueue(idx string, user *wechatUserState) {
+	data, err := os.ReadFile(filepath.Join(m.userDir(idx), "push_queue.json"))
+	if err != nil {
+		return
+	}
+	var queue []pushQueueItem
+	if err := json.Unmarshal(data, &queue); err != nil {
+		return
+	}
+	user.PushQueue = queue
+	if len(queue) > 0 {
+		log.Printf("[WECHAT] 恢复 %d 条待推送消息 (%s)", len(queue), idx)
+	}
+}
+
+// IsWechatIDInConfig 检查 wechat_id 是否在配置的白名单中
+func (m *WeChatManager) IsWechatIDInConfig(wechatID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, user := range m.users {
+		if user.Route.WechatID == wechatID {
+			return true
+		}
+	}
+	return false
 }
