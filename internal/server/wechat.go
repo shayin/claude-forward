@@ -803,14 +803,14 @@ func (m *WeChatManager) loadPushQueue(idx string, user *wechatUserState) {
 	}
 }
 
-// IsWechatIDInConfig 检查 wechat_id 是否在配置的白名单中
-func (m *WeChatManager) IsWechatIDInConfig(wechatID string) bool {
+// IsWechatIDInConfig 检查 wechat_id 是否在配置的白名单中，并返回该用户的 push_secret
+func (m *WeChatManager) IsWechatIDInConfig(wechatID string) (bool, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, user := range m.users {
 		if user.Route.WechatID == wechatID {
-			return true
+			return true, user.Route.PushSecret
 		}
 	}
-	return false
+	return false, ""
 }

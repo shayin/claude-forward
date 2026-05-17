@@ -82,7 +82,15 @@ func main() {
 		http.HandleFunc("/api/wechat/status", wechatHandler.HandleStatus)
 		http.HandleFunc("/api/wechat/qrcode/", wechatHandler.HandleQRCode)
 		http.HandleFunc("/api/wechat/relogin/", wechatHandler.HandleRelogin)
-		if config.WeChat.PushSecret != "" {
+		// Push API：只要有任意用户配置了 push_secret 就启用
+		pushEnabled := false
+		for _, u := range config.WeChat.Users {
+			if u.PushSecret != "" {
+				pushEnabled = true
+				break
+			}
+		}
+		if pushEnabled {
 			http.HandleFunc("/api/wechat/push", wechatHandler.HandlePush)
 			log.Println("WeChat Push API enabled")
 		}

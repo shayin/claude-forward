@@ -35,7 +35,7 @@ logging:
 wechat:
   enabled: false                      # 是否启用微信集成
   data_dir: "wechat-data"             # 数据存储目录（session、bindings）
-  push_secret: ""                     # Push API 密钥（留空不启用，填写后启用 POST /api/wechat/push）
   users:                              # 微信用户白名单路由（wechat_id → clawbot_id）
     # - wechat_id: "wxid_xxx@im.wechat"  # 微信用户 ID（首次从日志获取）
     #   clawbot_id: "my-macbook"          # 电脑级别 ID，对应 Client 的 clawbot_id
+    #   push_secret: "your-push-secret"   # Push API 密钥（留空则该用户不允许推送）

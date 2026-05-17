@@ -140,12 +140,6 @@ func (h *WeChatHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 验证 push_secret
-	if !h.authenticatePush(r) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	var req pushRequest
 	// 限制请求体大小为 64KB
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
@@ -161,10 +155,17 @@ func (h *WeChatHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PUSH] 收到推送请求 wechat_id=%s text_len=%d", req.WechatID, len(req.Text))
 
-	// 白名单检查
-	if !h.mgr.IsWechatIDInConfig(req.WechatID) {
+	// 白名单检查 + 获取用户级 push_secret
+	inConfig, userSecret := h.mgr.IsWechatIDInConfig(req.WechatID)
+	if !inConfig {
 		log.Printf("[PUSH] 白名单拒绝 wechat_id=%s", req.WechatID)
 		http.Error(w, "wechat_id not allowed", http.StatusForbidden)
+		return
+	}
+
+	// 验证用户级 push_secret
+	if !h.authenticatePush(r, userSecret) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -179,13 +180,11 @@ func (h *WeChatHandler) HandlePush(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
-// authenticatePush 验证 Push API 密钥
-func (h *WeChatHandler) authenticatePush(r *http.Request) bool {
-	secret := h.mgr.config.PushSecret
-	if secret == "" {
+// authenticatePush 验证 Push API 密钥（用户级别）
+func (h *WeChatHandler) authenticatePush(r *http.Request, userSecret string) bool {
+	if userSecret == "" {
 		return false
 	}
-	// 仅支持 Header 认证，避免 URL query 泄露到日志
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return token == secret
+	return token == userSecret
 }

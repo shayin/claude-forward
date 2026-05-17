@@ -11,33 +11,38 @@ import (
 
 func newTestWechatManager() *WeChatManager {
 	return NewWeChatManager(nil, nil, WeChatConfig{
-		Enabled:    true,
-		PushSecret: "test-secret-123",
+		Enabled: true,
 		Users: []UserRoute{
-			{WechatID: "wxid_test@im.wechat", ClawbotID: "test-pc"},
-			{WechatID: "wxid_test2@im.wechat", ClawbotID: "test-pc2"},
+			{WechatID: "wxid_test@im.wechat", ClawbotID: "test-pc", PushSecret: "secret-aaa"},
+			{WechatID: "wxid_test2@im.wechat", ClawbotID: "test-pc2", PushSecret: "secret-bbb"},
+			{WechatID: "wxid_nosecret@im.wechat", ClawbotID: "test-pc3", PushSecret: ""},
 		},
 	})
 }
 
-// TestIsWechatIDInConfig 白名单检查
+// TestIsWechatIDInConfig 白名单检查 + 返回 push_secret
 func TestIsWechatIDInConfig(t *testing.T) {
 	mgr := newTestWechatManager()
 
 	tests := []struct {
-		wechatID string
-		want     bool
+		wechatID       string
+		wantInConfig   bool
+		wantPushSecret string
 	}{
-		{"wxid_test@im.wechat", true},
-		{"wxid_test2@im.wechat", true},
-		{"wxid_unknown@im.wechat", false},
-		{"", false},
+		{"wxid_test@im.wechat", true, "secret-aaa"},
+		{"wxid_test2@im.wechat", true, "secret-bbb"},
+		{"wxid_nosecret@im.wechat", true, ""},
+		{"wxid_unknown@im.wechat", false, ""},
+		{"", false, ""},
 	}
 
 	for _, tt := range tests {
-		got := mgr.IsWechatIDInConfig(tt.wechatID)
-		if got != tt.want {
-			t.Errorf("IsWechatIDInConfig(%q) = %v, want %v", tt.wechatID, got, tt.want)
+		inConfig, secret := mgr.IsWechatIDInConfig(tt.wechatID)
+		if inConfig != tt.wantInConfig {
+			t.Errorf("IsWechatIDInConfig(%q) inConfig = %v, want %v", tt.wechatID, inConfig, tt.wantInConfig)
+		}
+		if secret != tt.wantPushSecret {
+			t.Errorf("IsWechatIDInConfig(%q) secret = %q, want %q", tt.wechatID, secret, tt.wantPushSecret)
 		}
 	}
 }
@@ -110,7 +115,6 @@ func TestPushQueuePersistence(t *testing.T) {
 	mgr := newTestWechatManager()
 	mgr.dataDir = t.TempDir()
 
-	// 添加消息到队列
 	mgr.mu.Lock()
 	user := mgr.users["0"]
 	user.PushQueue = []pushQueueItem{
@@ -118,10 +122,8 @@ func TestPushQueuePersistence(t *testing.T) {
 	}
 	mgr.mu.Unlock()
 
-	// 持久化
 	mgr.savePushQueue("0", user)
 
-	// 重新加载
 	user.PushQueue = nil
 	mgr.loadPushQueue("0", user)
 
@@ -133,25 +135,12 @@ func TestPushQueuePersistence(t *testing.T) {
 	}
 }
 
-// TestPushQueueFlushClears 队列投递后清空
+// TestPushQueueFlushClears 空队列 flush 无副作用
 func TestPushQueueFlushClears(t *testing.T) {
 	mgr := newTestWechatManager()
-	mgr.dataDir = t.TempDir()
 
 	mgr.mu.Lock()
 	user := mgr.users["0"]
-	user.PushQueue = []pushQueueItem{
-		{Text: "msg1", CreatedAt: time.Now()},
-	}
-	// Bot 未登录（LoginResult == nil），但 flushPushQueue 直接调用 Bot
-	// 需要设置 LoginResult 让 Bot 可用
-	mgr.mu.Unlock()
-
-	// flushPushQueue 在没有 LoginResult 的情况下也会尝试发送
-	// 实际上 flushPushQueue 不检查 LoginResult，它直接用 Bot 发
-	// 但 Bot 没有有效 token 会失败。这个测试验证队列清空逻辑。
-	// 先模拟一个空队列的情况
-	mgr.mu.Lock()
 	user.PushQueue = nil
 	mgr.mu.Unlock()
 
@@ -164,24 +153,27 @@ func TestPushQueueFlushClears(t *testing.T) {
 
 // --- HTTP Handler 测试 ---
 
-// TestHandlePush_Auth 认证检查
-func TestHandlePush_Auth(t *testing.T) {
+// TestHandlePush_PerUserAuth 用户级认证
+func TestHandlePush_PerUserAuth(t *testing.T) {
 	mgr := newTestWechatManager()
 	handler := NewWeChatHandler(mgr, nil)
 
 	tests := []struct {
-		name   string
-		secret string
-		want   int
+		name      string
+		wechatID  string
+		secret    string
+		want      int
 	}{
-		{"correct secret", "test-secret-123", http.StatusOK},
-		{"wrong secret", "wrong-secret", http.StatusUnauthorized},
-		{"empty secret", "", http.StatusUnauthorized},
+		{"user-a correct secret", "wxid_test@im.wechat", "secret-aaa", http.StatusOK},
+		{"user-a wrong secret", "wxid_test@im.wechat", "secret-bbb", http.StatusUnauthorized},
+		{"user-b correct secret", "wxid_test2@im.wechat", "secret-bbb", http.StatusOK},
+		{"user-a empty secret", "wxid_test@im.wechat", "", http.StatusUnauthorized},
+		{"no secret user", "wxid_nosecret@im.wechat", "any-secret", http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := `{"wechat_id":"wxid_test@im.wechat","text":"hello"}`
+			body := `{"wechat_id":"` + tt.wechatID + `","text":"hello"}`
 			req := httptest.NewRequest(http.MethodPost, "/api/wechat/push", strings.NewReader(body))
 			if tt.secret != "" {
 				req.Header.Set("Authorization", "Bearer "+tt.secret)
@@ -191,7 +183,7 @@ func TestHandlePush_Auth(t *testing.T) {
 			handler.HandlePush(w, req)
 
 			if w.Code != tt.want {
-				t.Errorf("status = %d, want %d", w.Code, tt.want)
+				t.Errorf("status = %d, want %d, body=%s", w.Code, tt.want, w.Body.String())
 			}
 		})
 	}
@@ -204,7 +196,7 @@ func TestHandlePush_Whitelist(t *testing.T) {
 
 	body := `{"wechat_id":"wxid_unknown@im.wechat","text":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/wechat/push", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-secret-123")
+	req.Header.Set("Authorization", "Bearer secret-aaa")
 	w := httptest.NewRecorder()
 
 	handler.HandlePush(w, req)
@@ -232,7 +224,7 @@ func TestHandlePush_MissingParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/wechat/push", strings.NewReader(tt.body))
-			req.Header.Set("Authorization", "Bearer test-secret-123")
+			req.Header.Set("Authorization", "Bearer secret-aaa")
 			w := httptest.NewRecorder()
 
 			handler.HandlePush(w, req)
@@ -251,7 +243,7 @@ func TestHandlePush_Success(t *testing.T) {
 
 	body := `{"wechat_id":"wxid_test@im.wechat","text":"hello push"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/wechat/push", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-secret-123")
+	req.Header.Set("Authorization", "Bearer secret-aaa")
 	w := httptest.NewRecorder()
 
 	handler.HandlePush(w, req)
@@ -266,23 +258,6 @@ func TestHandlePush_Success(t *testing.T) {
 	}
 	if resp["status"] != "queued" {
 		t.Errorf("status = %q, want %q", resp["status"], "queued")
-	}
-}
-
-// TestHandlePush_QuerySecretRejected Query 参数认证已移除
-func TestHandlePush_QuerySecretRejected(t *testing.T) {
-	mgr := newTestWechatManager()
-	handler := NewWeChatHandler(mgr, nil)
-
-	body := `{"wechat_id":"wxid_test@im.wechat","text":"hello"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/wechat/push?secret=test-secret-123", strings.NewReader(body))
-	w := httptest.NewRecorder()
-
-	handler.HandlePush(w, req)
-
-	// Query 参数不再支持认证，应返回 401
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -307,7 +282,7 @@ func TestHandlePush_InvalidJSON(t *testing.T) {
 	handler := NewWeChatHandler(mgr, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/wechat/push", strings.NewReader("not json"))
-	req.Header.Set("Authorization", "Bearer test-secret-123")
+	req.Header.Set("Authorization", "Bearer secret-aaa")
 	w := httptest.NewRecorder()
 
 	handler.HandlePush(w, req)
