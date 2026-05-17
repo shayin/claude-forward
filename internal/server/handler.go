@@ -123,14 +123,18 @@ func (h *Handler) writePump(conn *Connection) {
 				return
 			}
 
-			// 应用层加密
-			encrypted, err := protocol.EncryptMessage(h.encryptionKey, msg)
-			if err != nil {
-				log.Printf("Encrypt error (fatal): %v", err)
-				return
+			// 应用层加密（仅对 Client 连接加密，Web UI 保持明文）
+			outMsg := msg
+			if conn.Type == ConnTypeClient {
+				encrypted, err := protocol.EncryptMessage(h.encryptionKey, msg)
+				if err != nil {
+					log.Printf("Encrypt error (fatal): %v", err)
+					return
+				}
+				outMsg = encrypted
 			}
 
-			data, err := json.Marshal(encrypted)
+			data, err := json.Marshal(outMsg)
 			if err != nil {
 				log.Printf("JSON marshal error: %v", err)
 				continue
