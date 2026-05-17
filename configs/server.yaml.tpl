@@ -5,6 +5,7 @@
 server:
   host: "0.0.0.0"                     # 监听地址
   port: 6022                          # 监听端口
+  encryption_key: ""                  # 应用层加密密钥（留空不加密，需与客户端一致，建议 32+ 字符随机字符串）
   tls:
     enabled: false                    # 是否启用 TLS（生产环境建议开启）
     cert_file: ""                     # TLS 证书文件路径

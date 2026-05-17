@@ -6,6 +6,7 @@ server:
   url: "wss://your-server-ip:6022"   # 服务器 WebSocket 地址
   token: "your-secret-token-here"     # 认证 Token，需与 server.yaml 中的 tokens 一致
   reconnect_interval: 5               # 断线重连间隔（秒）
+  encryption_key: ""                  # 应用层加密密钥（留空不加密，需与服务器一致，建议 32+ 字符随机字符串）
 
 # 终端模式配置（用于 tmux 终端转发，聊天模式不需要）
 tmux:
