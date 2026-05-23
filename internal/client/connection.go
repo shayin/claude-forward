@@ -572,6 +572,8 @@ func (c *Client) handleChatInput(userID string, text string) {
 	var bgCostUSD float64
 	var bgIsError bool
 	var bgErrorMsg string
+	var bgEventCount int
+	var bgLastLog time.Time
 
 	for event := range c.claude.Stream() {
 		// 从事件中捕获 session_id，分别持久化
@@ -625,6 +627,14 @@ func (c *Client) handleChatInput(userID string, text string) {
 			case EventError:
 				bgIsError = true
 				bgErrorMsg = event.Text
+			}
+			bgEventCount++
+			c.bgMu.Lock()
+			bgActive := c.bgMode
+			c.bgMu.Unlock()
+			if bgActive && time.Since(bgLastLog) >= 30*time.Second {
+				bgLastLog = time.Now()
+				log.Printf("[BG] Task still running: events=%d textLen=%d", bgEventCount, len(bgFullText))
 			}
 		} else {
 			// Web UI：追加到会话事件缓冲，支持断线重连回放
