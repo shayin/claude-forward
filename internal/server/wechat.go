@@ -321,10 +321,15 @@ func (m *WeChatManager) handleMessage(idx string, user *wechatUserState, msg ILi
 	go m.sendTyping(user, fromUser)
 
 	// 通过 Hub 路由消息（复用 BotHandler 的虚拟连接模式）
-	resp, err := m.chatViaHub(clientID, text)
+	resp, err := m.chatViaHub(clientID, text, fromUser)
 	if err != nil {
 		log.Printf("[WECHAT] Chat error: %v", err)
 		sendReply(fmt.Sprintf("❌ 请求失败: %v", err))
+		return
+	}
+
+	if resp.IsBackground {
+		sendReply("⏳ 任务执行超时，已转为后台运行，完成后会推送结果给你")
 		return
 	}
 
@@ -359,15 +364,17 @@ func (m *WeChatManager) handleMessage(idx string, user *wechatUserState, msg ILi
 
 // wechatChatResponse Hub 聊天响应
 type wechatChatResponse struct {
-	FullText  string
-	ToolCalls []string
-	CostUSD   float64
-	IsError   bool
-	ErrorMsg  string
+	FullText     string
+	ToolCalls    []string
+	CostUSD      float64
+	IsError      bool
+	ErrorMsg     string
+	IsBackground bool   // 超时转后台
+	BgTaskID     string // 后台任务 ID
 }
 
 // chatViaHub 通过 Hub 直接路由消息（不走 HTTP）
-func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatResponse, error) {
+func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string) (*wechatChatResponse, error) {
 	client, ok := m.hub.GetClient(clientID)
 	if !ok {
 		return nil, fmt.Errorf("client %s not found", clientID)
@@ -421,6 +428,8 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 	hasStreamDelta := false
 	timeout := time.NewTimer(5 * time.Minute)
 	defer timeout.Stop()
+	hardTimeout := time.NewTimer(30 * time.Minute)
+	defer hardTimeout.Stop()
 
 	for {
 		select {
@@ -470,10 +479,24 @@ func (m *WeChatManager) chatViaHub(clientID string, text string) (*wechatChatRes
 			timeout.Reset(15 * time.Minute)
 
 		case <-timeout.C:
-			return nil, fmt.Errorf("chat timeout")
+			taskID := uuid.New().String()
+			bgMsg, _ := protocol.NewMessage(protocol.TypeBackgroundMode, protocol.BackgroundModePayload{
+				TaskID:   taskID,
+				WechatID: wechatID,
+			})
+			safeSend(client.Send, bgMsg)
+			log.Printf("[BG] Task timeout, switching to background: taskID=%s wechatID=%s", taskID, wechatID)
+			return &wechatChatResponse{IsBackground: true, BgTaskID: taskID}, nil
 
-		case <-time.After(20 * time.Minute):
-			return nil, fmt.Errorf("chat timeout (hard)")
+		case <-hardTimeout.C:
+			taskID := uuid.New().String()
+			bgMsg, _ := protocol.NewMessage(protocol.TypeBackgroundMode, protocol.BackgroundModePayload{
+				TaskID:   taskID,
+				WechatID: wechatID,
+			})
+			safeSend(client.Send, bgMsg)
+			log.Printf("[BG] Hard timeout, switching to background: taskID=%s wechatID=%s", taskID, wechatID)
+			return &wechatChatResponse{IsBackground: true, BgTaskID: taskID}, nil
 		}
 	}
 }

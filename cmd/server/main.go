@@ -78,6 +78,7 @@ func main() {
 	// 微信集成（内置 iLink 支持）
 	if config.WeChat.Enabled {
 		wechatMgr := server.NewWeChatManager(hub, auth, config.WeChat)
+		handler.SetWeChatManager(wechatMgr)
 		wechatHandler := server.NewWeChatHandler(wechatMgr, auth)
 		http.HandleFunc("/api/wechat/status", wechatHandler.HandleStatus)
 		http.HandleFunc("/api/wechat/qrcode/", wechatHandler.HandleQRCode)

@@ -47,6 +47,11 @@ const (
 
 	// 错误
 	TypeError MessageType = "error"
+
+	// 后台任务
+	TypeBackgroundMode   MessageType = "background_mode"    // Server→Client: 当前任务转后台模式
+	TypeBackgroundStart  MessageType = "background_start"   // Server→Client: 启动新后台任务
+	TypeBackgroundResult MessageType = "background_result"   // Client→Server: 后台任务完成
 )
 
 // Message WebSocket 消息格式
@@ -160,6 +165,29 @@ type PermissionRequestPayload struct {
 type PermissionResponsePayload struct {
 	RequestID string `json:"request_id"`
 	Approved  bool   `json:"approved"`
+}
+
+// BackgroundModePayload 后台模式通知（Server→Client）
+type BackgroundModePayload struct {
+	TaskID   string `json:"task_id"`
+	WechatID string `json:"wechat_id"`
+}
+
+// BackgroundStartPayload 启动后台任务（Server→Client）
+type BackgroundStartPayload struct {
+	TaskID   string `json:"task_id"`
+	Text     string `json:"text"`
+	WechatID string `json:"wechat_id"`
+}
+
+// BackgroundResultPayload 后台任务结果（Client→Server）
+type BackgroundResultPayload struct {
+	TaskID    string  `json:"task_id"`
+	WechatID  string  `json:"wechat_id"`
+	FullText  string  `json:"full_text"`
+	IsError   bool    `json:"is_error"`
+	ErrorMsg  string  `json:"error_msg,omitempty"`
+	CostUSD   float64 `json:"cost_usd,omitempty"`
 }
 
 // NewMessage 创建新消息

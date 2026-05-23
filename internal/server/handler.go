@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -23,7 +24,8 @@ var upgrader = websocket.Upgrader{
 type Handler struct {
 	hub           *Hub
 	auth          *Auth
-	encryptionKey []byte // 应用层加密密钥（nil 表示不加密）
+	encryptionKey []byte          // 应用层加密密钥（nil 表示不加密）
+	wechatMgr     *WeChatManager // 微信管理器（可选，用于后台任务推送）
 }
 
 // NewHandler 创建处理器
@@ -33,6 +35,11 @@ func NewHandler(hub *Hub, auth *Auth, encryptionKey []byte) *Handler {
 		auth:          auth,
 		encryptionKey: encryptionKey,
 	}
+}
+
+// SetWeChatManager 设置微信管理器
+func (h *Handler) SetWeChatManager(mgr *WeChatManager) {
+	h.wechatMgr = mgr
 }
 
 // HandleWS 处理 WebSocket 连接
@@ -196,6 +203,9 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 	case protocol.TypePong:
 		// 心跳响应，重置读超时
 		conn.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+	case protocol.TypeBackgroundResult:
+		h.handleBackgroundResult(conn, msg)
 	}
 }
 
@@ -380,6 +390,39 @@ func (h *Handler) handleOutput(conn *Connection, msg *protocol.Message) {
 
 	if targetUser != nil {
 		targetUser.Send <- msg
+	}
+}
+
+// handleBackgroundResult 处理后台任务结果（Client→Server）
+func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message) {
+	var payload protocol.BackgroundResultPayload
+	if err := msg.ParsePayload(&payload); err != nil {
+		log.Printf("[BG] Failed to parse background_result: %v", err)
+		return
+	}
+
+	log.Printf("[BG] Received background result: taskID=%s wechatID=%s isError=%v textLen=%d",
+		payload.TaskID, payload.WechatID, payload.IsError, len(payload.FullText))
+
+	if h.wechatMgr == nil {
+		log.Printf("[BG] No WeChatManager, cannot push result")
+		return
+	}
+
+	// 推送结果到微信用户
+	text := payload.FullText
+	if payload.IsError {
+		text = fmt.Sprintf("❌ 后台任务失败: %s", payload.ErrorMsg)
+	}
+	if text == "" {
+		text = "（后台任务完成，无文本输出）"
+	}
+
+	_, err := h.wechatMgr.PushMessage(payload.WechatID, text)
+	if err != nil {
+		log.Printf("[BG] Failed to push background result: taskID=%s err=%v", payload.TaskID, err)
+	} else {
+		log.Printf("[BG] Background result pushed: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
 	}
 }
 

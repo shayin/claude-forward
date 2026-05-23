@@ -42,6 +42,13 @@ type Client struct {
 
 	// Bot API 独立会话（与 Web UI 隔离）
 	botSessionID string
+
+	// 后台模式：超时后任务转为后台继续运行
+	// 受 bgMu 保护：handleMessage 写入，handleChatInput 读取/清零
+	bgMu       sync.Mutex
+	bgMode     bool   // 当前是否处于后台模式
+	bgTaskID   string // 后台任务 ID
+	bgWechatID string // 完成后推送给谁
 }
 
 // NewClient 创建客户端
@@ -447,6 +454,19 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		})
 		infoMsg.To = msg.From
 		c.send <- infoMsg
+
+	case protocol.TypeBackgroundMode:
+		var payload protocol.BackgroundModePayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			log.Printf("[BG] Failed to parse background_mode: %v", err)
+			return
+		}
+		log.Printf("[BG] Received background_mode: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
+		c.bgMu.Lock()
+		c.bgMode = true
+		c.bgTaskID = payload.TaskID
+		c.bgWechatID = payload.WechatID
+		c.bgMu.Unlock()
 	}
 }
 
@@ -546,6 +566,13 @@ func (c *Client) handleChatInput(userID string, text string) {
 	}
 
 	// 流式转发事件到用户
+	// åå°æ¨¡å¼ï¼æ¶éå®æ´ç»æç¨äºå¼æ­¥æ¨é
+	var bgFullText string
+	var bgHasStreamDelta bool
+	var bgCostUSD float64
+	var bgIsError bool
+	var bgErrorMsg string
+
 	for event := range c.claude.Stream() {
 		// 从事件中捕获 session_id，分别持久化
 		if event.SessionID != "" {
@@ -581,6 +608,24 @@ func (c *Client) handleChatInput(userID string, text string) {
 				msg.To = uid
 				c.send <- msg
 			}
+			// 后台模式：收集文本用于异步推送
+			switch event.Type {
+			case EventStreamDelta:
+				bgHasStreamDelta = true
+				bgFullText += event.Text
+			case EventText:
+				if !bgHasStreamDelta {
+					bgFullText = event.Text
+				}
+			case EventResult:
+				if !bgHasStreamDelta && bgFullText == "" {
+					bgFullText = event.Text
+				}
+				bgCostUSD = event.CostUSD
+			case EventError:
+				bgIsError = true
+				bgErrorMsg = event.Text
+			}
 		} else {
 			// Web UI：追加到会话事件缓冲，支持断线重连回放
 			c.sessionMu.Lock()
@@ -612,6 +657,31 @@ func (c *Client) handleChatInput(userID string, text string) {
 				c.send <- readyMsg
 			}
 		}
+	}
+
+	// 后台模式：任务完成，发送结果给 Server 推送
+	c.bgMu.Lock()
+	bgActive := c.bgMode && c.bgWechatID != ""
+	bgTask := c.bgTaskID
+	bgWechat := c.bgWechatID
+	if bgActive {
+		c.bgMode = false
+		c.bgTaskID = ""
+		c.bgWechatID = ""
+	}
+	c.bgMu.Unlock()
+
+	if bgActive {
+		log.Printf("[BG] Background task completed: taskID=%s textLen=%d", bgTask, len(bgFullText))
+		resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, protocol.BackgroundResultPayload{
+			TaskID:   bgTask,
+			WechatID: bgWechat,
+			FullText: bgFullText,
+			IsError:  bgIsError,
+			ErrorMsg: bgErrorMsg,
+			CostUSD:  bgCostUSD,
+		})
+		c.send <- resultMsg
 	}
 }
 
