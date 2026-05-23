@@ -73,7 +73,6 @@ func NewClaudeManager(config ClaudeConfig) *ClaudeManager {
 	}
 	cm := &ClaudeManager{
 		config:  config,
-		events:  make(chan ClaudeEvent, 256),
 		running: false,
 	}
 	// 从文件恢复上次的 session_id
@@ -119,6 +118,7 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 		return fmt.Errorf("claude is still processing")
 	}
 	cm.running = true
+	cm.events = make(chan ClaudeEvent, 256)
 	cm.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -184,6 +184,7 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 	// 启动 JSONL 读取协程
 	go func() {
 		defer func() {
+			close(cm.events)
 			cm.setRunning(false)
 			cancel()
 			if logFile != nil {
