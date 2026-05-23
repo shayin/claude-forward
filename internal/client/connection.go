@@ -658,6 +658,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 			}
 		}
 	}
+	log.Printf("[BG] Stream ended, checking background mode: bgMode=%v textLen=%d", c.bgMode, len(bgFullText))
 
 	// 后台模式：任务完成，发送结果给 Server 推送
 	c.bgMu.Lock()
