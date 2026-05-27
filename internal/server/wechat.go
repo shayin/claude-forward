@@ -426,9 +426,9 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 	// 收集响应
 	result := &wechatChatResponse{}
 	hasStreamDelta := false
-	timeout := time.NewTimer(30 * time.Second)
+	timeout := time.NewTimer(3 * time.Minute)
 	defer timeout.Stop()
-	hardTimeout := time.NewTimer(2 * time.Minute)
+	hardTimeout := time.NewTimer(30 * time.Minute)
 	defer hardTimeout.Stop()
 
 	for {
@@ -476,7 +476,7 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 				return result, nil
 			}
 
-			timeout.Reset(30 * time.Second)
+			timeout.Reset(10 * time.Minute)
 
 		case <-timeout.C:
 			taskID := uuid.New().String()
