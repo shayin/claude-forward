@@ -134,11 +134,9 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 	if cm.config.AllowedTools != "" {
 		args = append(args, "--allowedTools", cm.config.AllowedTools)
 	}
-	// 绕过 Claude 内部权限系统：
-	// 1. --dangerously-skip-permissions: 跳过所有权限检查
-	// 2. --setting-sources "": 不加载用户 settings.json 中的 deny 规则
+	// --dangerously-skip-permissions: 跳过所有权限检查（deny 规则也不会生效）
+	// 不使用 --setting-sources ""，保留全局 settings 加载，使 skills/plugins 正常工作
 	args = append(args, "--dangerously-skip-permissions")
-	args = append(args, "--setting-sources", "")
 	if cm.config.HookSettingsPath != "" {
 		args = append(args, "--settings", cm.config.HookSettingsPath)
 	}
@@ -150,7 +148,8 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 	cmd.Dir = cm.getWorkDir()
 
 	// 注入用户 settings.json 中的 env 变量到进程环境
-	// 因为 --setting-sources "" 阻止了 Claude 加载 settings，env 中的认证信息不会被自动应用
+	// 虽然去掉 --setting-sources "" 后 CC 会自行加载 settings，
+	// 但保留 injectEnv 作为兜底，确保 env 一定生效
 	cm.injectUserEnv(cmd)
 
 	// 日志重定向到文件（按 clientID 区分），避免干扰
