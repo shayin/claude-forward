@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/shayin/claude-forward/internal/protocol"
@@ -680,14 +681,17 @@ func splitMessage(text string, chunkSize int) []string {
 	if len(text) <= chunkSize {
 		return []string{text}
 	}
+
 	var chunks []string
 	for len(text) > 0 {
 		if len(text) <= chunkSize {
 			chunks = append(chunks, text)
 			break
 		}
-		chunks = append(chunks, text[:chunkSize])
-		text = text[chunkSize:]
+
+		cut := findSafeCutPoint(text, chunkSize)
+		chunks = append(chunks, text[:cut])
+		text = text[cut:]
 	}
 	if len(chunks) > 1 {
 		for i := range chunks {
@@ -695,6 +699,113 @@ func splitMessage(text string, chunkSize int) []string {
 		}
 	}
 	return chunks
+}
+
+// findSafeCutPoint 在 maxBytes 范围内找到一个安全的切割点
+// 优先在段落/空行处切割，其次在句子结尾，最后在 UTF-8 字符边界
+func findSafeCutPoint(text string, maxBytes int) int {
+	if maxBytes >= len(text) {
+		return len(text)
+	}
+
+	// 1. 优先在段落边界（空行 \n\n）切割
+	if idx := lastIndexOf(text[:maxBytes], "\n\n"); idx > 0 {
+		return idx + 2
+	}
+
+	// 2. 检查切割点是否在表格中间，如果是则回退到表格开始之前
+	if cut := avoidTableCut(text, maxBytes); cut > 0 {
+		return cut
+	}
+
+	// 3. 在换行符处切割
+	if idx := lastIndexOf(text[:maxBytes], "\n"); idx > 0 {
+		return idx + 1
+	}
+
+	// 4. 在句号、感叹号、问号等句子结尾切割（中文和英文）
+	if idx := lastIndexOfAny(text[:maxBytes], "。！？.!?\n"); idx > 0 {
+		// 跳过句末标点，在后面切割
+		_, size := utf8.DecodeRuneInString(text[idx:])
+		return idx + size
+	}
+
+	// 5. 兜底：确保在 UTF-8 字符边界切割
+	pos := maxBytes
+	for pos > 0 && !utf8.RuneStart(text[pos]) {
+		pos--
+	}
+	return pos
+}
+
+// lastIndexOf 返回 s 中 substr 最后一次出现的位置
+func lastIndexOf(s, substr string) int {
+	return strings.LastIndex(s, substr)
+}
+
+// lastIndexOfAny 返回 s 中 chars 任意字符最后一次出现的位置
+func lastIndexOfAny(s, chars string) int {
+	return strings.LastIndexAny(s, chars)
+}
+
+// avoidTableCut 检查 maxBytes 位置的行是否在 Markdown 表格中间
+// 如果是，返回表格开始之前的切割位置；如果不是表格中间，返回 -1
+func avoidTableCut(text string, maxBytes int) int {
+	// 找到 maxBytes 位置所在的行
+	lineStart := lastIndexOf(text[:maxBytes], "\n")
+	if lineStart < 0 {
+		lineStart = 0
+	} else {
+		lineStart++ // 跳过 \n
+	}
+
+	// 找到行结束位置
+	lineEnd := strings.Index(text[maxBytes:], "\n")
+	if lineEnd < 0 {
+		lineEnd = len(text)
+	} else {
+		lineEnd = maxBytes + lineEnd
+	}
+
+	// 检查当前行是否是表格行（以 | 开头）
+	line := strings.TrimSpace(text[lineStart:lineEnd])
+	if line == "" || line[0] != '|' {
+		return -1 // 不在表格行上
+	}
+
+	// 当前在表格中间，需要找到这个表格块的起始位置
+	// 从 lineStart 往前找，直到遇到非表格行或文本开头
+	lines := strings.Split(text[:lineStart], "\n")
+	tableStartLine := len(lines) - 1
+	for tableStartLine >= 0 {
+		trimmed := strings.TrimSpace(lines[tableStartLine])
+		if trimmed == "" || trimmed[0] != '|' {
+			tableStartLine++
+			break
+		}
+		tableStartLine--
+	}
+	if tableStartLine < 0 {
+		tableStartLine = 0
+	}
+
+	// 计算表格开始前的字节偏移
+	if tableStartLine == 0 {
+		return 0 // 表格从文本开头就开始了，无法回退
+	}
+
+	// 累加到 tableStartLine-1 行末尾的字节偏移（在表格前的换行处切割）
+	offset := 0
+	for i := 0; i < tableStartLine; i++ {
+		offset += len(lines[i])
+		if i < len(lines)-1 {
+			offset++ // \n
+		}
+	}
+	if offset > 0 {
+		return offset + 1 // +1 跳过 \n
+	}
+	return -1
 }
 
 // --- Push API ---
