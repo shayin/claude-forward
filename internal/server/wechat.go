@@ -450,12 +450,14 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 					// 增量文本片段，累加
 					hasStreamDelta = true
 					result.FullText += payload.Text
+					timeout.Reset(15 * time.Minute) // 有文字输出才重置超时
 				case "text":
 					// assistant 消息中的完整文本块
 					// 如果有 stream_delta 则跳过（避免重复），否则作为唯一文本源
 					if !hasStreamDelta {
 						result.FullText = payload.Text
 					}
+					timeout.Reset(15 * time.Minute)
 				case "result":
 					// result 包含完整回复文本，仅在没有其他来源时使用
 					if !hasStreamDelta && result.FullText == "" {
@@ -464,6 +466,7 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 					result.CostUSD = payload.CostUSD
 				case "tool_start":
 					result.ToolCalls = append(result.ToolCalls, payload.ToolName)
+					// tool 事件不重置超时，2 分钟无文字输出即转后台
 				}
 
 			case protocol.TypeChatReady:
@@ -476,8 +479,6 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 				result.ErrorMsg = payload.Message
 				return result, nil
 			}
-
-			timeout.Reset(15 * time.Minute)
 
 		case <-timeout.C:
 			taskID := uuid.New().String()
