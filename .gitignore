@@ -51,3 +51,6 @@ certs/
 
 # WeChat bridge (external)
 wechat-bridge
+
+# WeChat runtime data (push queue, etc.)
+internal/server/wechat-data/
