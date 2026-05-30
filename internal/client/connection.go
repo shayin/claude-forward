@@ -33,6 +33,7 @@ type Client struct {
 	forwardCancel context.CancelFunc // 用于停止 forwarding goroutine
 	forwardMu     sync.Mutex
 	connClosed    int32 // 连接是否已关闭的标志（用于防止重复关闭）
+	connGen       int64 // 连接代数，每次 Connect 递增（用于检测断线重连）
 
 	// 会话级别事件缓冲：存储当前 Claude 会话的所有事件
 	// 在 handleChatInput goroutine 退出后仍保留，支持断线重连后完整回放
@@ -69,6 +70,9 @@ func (c *Client) Connect() error {
 
 	// 重置连接关闭标志（用于重连场景）
 	atomic.StoreInt32(&c.connClosed, 0)
+
+	// 递增连接代数
+	atomic.AddInt64(&c.connGen, 1)
 
 	// 初始化加密密钥
 	if c.config.Server.EncryptionKey != "" {
@@ -586,6 +590,10 @@ func (c *Client) handleChatInput(userID string, text string) {
 	var bgErrorMsg string
 	var bgEventCount int
 	var bgLastLog time.Time
+	var bgActive bool
+
+	// 记录开始时的连接代数，用于检测断线重连
+	startGen := atomic.LoadInt64(&c.connGen)
 
 	for event := range c.claude.Stream() {
 		// 从事件中捕获 session_id，分别持久化
@@ -618,7 +626,8 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 		if isBot {
 			// Bot API：直接发送，不存 sessionEvents
-			if uid != "" {
+			// 后台模式下跳过发送（无人接收，避免 c.send 阻塞）
+			if uid != "" && !bgActive {
 				msg.To = uid
 				c.send <- msg
 			}
@@ -641,9 +650,19 @@ func (c *Client) handleChatInput(userID string, text string) {
 				bgErrorMsg = event.Text
 			}
 			bgEventCount++
+
+			// 检测连接代数变化（服务器重启/断线重连），自动切换后台模式
 			c.bgMu.Lock()
-			bgActive := c.bgMode
+			bgActive = c.bgMode
+			if !bgActive && atomic.LoadInt64(&c.connGen) != startGen {
+				c.bgMode = true
+				c.bgTaskID = fmt.Sprintf("auto-bg-%d", time.Now().UnixMilli())
+				c.bgWechatID = strings.TrimPrefix(userID, "bot-")
+				bgActive = true
+				log.Printf("[BG] Connection lost mid-task, auto-switched to background mode: taskID=%s wechatID=%s", c.bgTaskID, c.bgWechatID)
+			}
 			c.bgMu.Unlock()
+
 			if bgActive && time.Since(bgLastLog) >= 30*time.Second {
 				bgLastLog = time.Now()
 				log.Printf("[BG] Task still running: events=%d textLen=%d", bgEventCount, len(bgFullText))
@@ -669,7 +688,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 		}
 
 		// result 事件表示轮次结束，发送 chat_ready
-		if event.Type == EventResult {
+		if event.Type == EventResult && !bgActive {
 			uid := currentUserID()
 			if uid != "" {
 				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
@@ -684,7 +703,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 	// 后台模式：任务完成，发送结果给 Server 推送
 	c.bgMu.Lock()
-	bgActive := c.bgMode && c.bgWechatID != ""
+	bgActive = c.bgMode && c.bgWechatID != ""
 	bgTask := c.bgTaskID
 	bgWechat := c.bgWechatID
 	if bgActive {
@@ -704,7 +723,12 @@ func (c *Client) handleChatInput(userID string, text string) {
 			ErrorMsg: bgErrorMsg,
 			CostUSD:  bgCostUSD,
 		})
-		c.send <- resultMsg
+		select {
+		case c.send <- resultMsg:
+			log.Printf("[BG] BackgroundResult sent successfully")
+		case <-time.After(30 * time.Second):
+			log.Printf("[BG] WARNING: Failed to send BackgroundResult after 30s, dropping")
+		}
 	}
 }
 
