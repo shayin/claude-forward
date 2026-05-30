@@ -167,23 +167,35 @@ func (c *Client) Run() {
 		}
 	}
 
-	// 重连循环
+	// 重连循环（指数退避）
+	var retryCount int
+	const maxRetryDelay = 60 // 最大退避秒数
+	baseInterval := time.Duration(c.config.Server.ReconnectInterval) * time.Second
+
 	for {
 		// 每次连接创建新的 context（旧的 cancel 后不会复用）
 		c.ctx, c.cancel = context.WithCancel(context.Background())
 
 		if err := c.Connect(); err != nil {
-			log.Printf("Connection failed: %v", err)
-			time.Sleep(time.Duration(c.config.Server.ReconnectInterval) * time.Second)
+			retryCount++
+			delay := time.Duration(retryCount*retryCount*2) * time.Second
+			if delay.Seconds() > float64(maxRetryDelay) {
+				delay = time.Duration(maxRetryDelay) * time.Second
+			}
+			log.Printf("Connection failed (attempt %d), retrying in %ds: %v", retryCount, int(delay.Seconds()), err)
+			time.Sleep(delay)
 			continue
 		}
+
+		// 连接成功，重置计数
+		retryCount = 0
 
 		// 等待连接断开
 		<-c.ctx.Done()
 		c.Disconnect()
 
-		log.Printf("Disconnected, reconnecting in %ds...", c.config.Server.ReconnectInterval)
-		time.Sleep(time.Duration(c.config.Server.ReconnectInterval) * time.Second)
+		log.Printf("Disconnected, reconnecting in %ds...", int(baseInterval.Seconds()))
+		time.Sleep(baseInterval)
 	}
 }
 
@@ -194,9 +206,9 @@ func (c *Client) readPump() {
 	}()
 
 	c.conn.SetReadLimit(512 * 1024)
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		return nil
 	})
 
@@ -226,7 +238,7 @@ func (c *Client) readPump() {
 
 // writePump 写入消息
 func (c *Client) writePump() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer func() {
 		ticker.Stop()
 		// 只在连接未关闭时关闭（通过 Disconnect 的原子操作保证）

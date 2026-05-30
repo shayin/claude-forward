@@ -84,9 +84,9 @@ func (h *Handler) readPump(conn *Connection) {
 	}()
 
 	conn.Conn.SetReadLimit(512 * 1024) // 512KB
-	conn.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	conn.Conn.SetPongHandler(func(string) error {
-		conn.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		conn.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		return nil
 	})
 
@@ -115,7 +115,7 @@ func (h *Handler) readPump(conn *Connection) {
 
 // writePump 写入消息
 func (h *Handler) writePump(conn *Connection) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer func() {
 		ticker.Stop()
 		conn.Conn.Close()
