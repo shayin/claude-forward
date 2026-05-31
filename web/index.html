@@ -1490,8 +1490,12 @@
                     if (localThinkingEl) { localThinkingEl.remove(); localThinkingEl = null; }
                     isStreaming = false;
                     document.getElementById('sendBtn').disabled = false;
-                    addSystemMessage('错误: ' + (msg.payload?.message || '未知错误'), 'error');
-                    chatHistory.push({ type: 'system', text: '错误: ' + (msg.payload?.message || '未知错误'), subtype: 'error' });
+                    const errText = msg.payload?.message || '未知错误';
+                    addSystemMessage('错误: ' + errText, 'error');
+                    if (errText.includes('context window') || errText.includes('token limit') || errText.includes('prompt is too long') || errText.includes('input is too long')) {
+                        addSystemMessage('上下文已满，已自动重置。请重新发送消息开始新的对话。', 'info');
+                    }
+                    chatHistory.push({ type: 'system', text: '错误: ' + errText, subtype: 'error' });
                     saveHistory();
                     break;
                 case 'error':
@@ -1615,6 +1619,9 @@
                         const ctxWin = payload.context_window || 200000;
                         const pct = ((totalInput / ctxWin) * 100).toFixed(1);
                         usageParts.push(`${fmt(totalInput)}/${fmt(ctxWin)} ${pct}%`);
+                        if (parseFloat(pct) >= 80) {
+                            addSystemMessage('上下文使用率已超过 ' + pct + '%，建议尽快新建会话', 'warning');
+                        }
                     }
                     if (usageParts.length > 0) {
                         const usageText = usageParts.join(' | ');

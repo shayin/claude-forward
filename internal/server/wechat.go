@@ -571,7 +571,23 @@ func (m *WeChatManager) handleCommand(idx string, user *wechatUserState, fromUse
 		sendReply(fmt.Sprintf("✅ 已切换到 %s", targetID))
 
 	case "/new":
-		sendReply("✅ 新会话指令已记录（下一条消息将使用新会话）")
+		clientID, bound := user.Bindings[fromUser]
+		if !bound || clientID == "" {
+			sendReply("✅ 新会话指令已记录（下一条消息将使用新会话）")
+			return
+		}
+		client, ok := m.hub.GetClient(clientID)
+		if !ok {
+			sendReply("❌ 客户端不在线")
+			return
+		}
+		newMsg, _ := protocol.NewMessage(protocol.TypeNewSession, nil)
+		newMsg.From = "bot-wechat-" + fromUser
+		if !safeSend(client.Send, newMsg) {
+			sendReply("❌ 发送失败，客户端可能已断开")
+			return
+		}
+		sendReply("✅ 已新建会话，请发送你的消息")
 
 	case "/status":
 		binding := user.Bindings[fromUser]

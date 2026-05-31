@@ -383,6 +383,19 @@ func parseJSONLLine(line string) []ClaudeEvent {
 			events = append(events, evt)
 		}
 
+	case "error":
+		// Claude CLI 错误事件（如 context window 满）
+		var msg struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err == nil {
+			events = append(events, ClaudeEvent{
+				Type: EventError,
+				Text: msg.Message,
+			})
+		}
+
 	default:
 		// 尝试解析为 content_block_delta（流式事件）
 		if strings.HasPrefix(typeStr, "content_block") {

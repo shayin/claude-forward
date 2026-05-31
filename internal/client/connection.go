@@ -592,6 +592,11 @@ func (c *Client) handleChatInput(userID string, text string) {
 	var bgLastLog time.Time
 	var bgActive bool
 
+	// 追踪是否收到 result/error 事件，用于检测非正常结束
+	var gotResult bool
+	var gotError bool
+	var lastErrorMsg string
+
 	// 记录开始时的连接代数，用于检测断线重连
 	startGen := atomic.LoadInt64(&c.connGen)
 
@@ -645,9 +650,12 @@ func (c *Client) handleChatInput(userID string, text string) {
 					bgFullText = event.Text
 				}
 				bgCostUSD = event.CostUSD
+				gotResult = true
 			case EventError:
 				bgIsError = true
 				bgErrorMsg = event.Text
+				gotError = true
+				lastErrorMsg = event.Text
 			}
 			bgEventCount++
 
@@ -700,6 +708,67 @@ func (c *Client) handleChatInput(userID string, text string) {
 		}
 	}
 	log.Printf("[BG] Stream ended, checking background mode: bgMode=%v textLen=%d", c.bgMode, len(bgFullText))
+
+	// 非正常结束：收到 error 但没有收到 result（如 context window 满）
+	if !gotResult && gotError {
+		log.Printf("[CTX] Stream ended with error, no result: isBot=%v msg=%s", isBot, lastErrorMsg)
+		if isBot {
+			// Bot（微信端）：主动推送错误通知
+			if !bgActive {
+				wechatID := strings.TrimPrefix(userID, "bot-")
+				if wechatID != "" {
+					pushText := lastErrorMsg
+					if isContextWindowError(lastErrorMsg) {
+						pushText = "上下文已满，已自动新建会话，请重新发送你的消息。"
+					}
+					resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, protocol.BackgroundResultPayload{
+						TaskID:   fmt.Sprintf("error-%d", time.Now().UnixMilli()),
+						WechatID: wechatID,
+						IsError:  true,
+						ErrorMsg: pushText,
+					})
+					select {
+					case c.send <- resultMsg:
+						log.Printf("[CTX] Error pushed to wechat")
+					case <-time.After(10 * time.Second):
+						log.Printf("[CTX] WARNING: Failed to push error to wechat")
+					}
+				}
+			}
+			// 自动重置 bot session
+			if isContextWindowError(lastErrorMsg) {
+				log.Printf("[CTX] Context window full, auto-resetting bot session")
+				c.botSessionID = ""
+			}
+		} else {
+			// Web UI：发送 chat_error + chat_ready 恢复前端交互
+			uid := currentUserID()
+			if uid != "" {
+				errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
+					Code:    400,
+					Message: lastErrorMsg,
+				})
+				errMsg.To = uid
+				c.send <- errMsg
+
+				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+					SessionID: c.claude.SessionID(),
+				})
+				readyMsg.To = uid
+				c.send <- readyMsg
+			}
+			// 自动重置 Web UI session
+			if isContextWindowError(lastErrorMsg) {
+				log.Printf("[CTX] Context window full, auto-resetting session")
+				c.claude.ResetSession()
+				c.sessionMu.Lock()
+				c.sessionEvents = nil
+				c.sentUpTo = 0
+				c.saveSessionEvents()
+				c.sessionMu.Unlock()
+			}
+		}
+	}
 
 	// 后台模式：任务完成，发送结果给 Server 推送
 	c.bgMu.Lock()
@@ -822,4 +891,13 @@ func (c *Client) loadSessionEvents() {
 		c.sessionEvents = events
 		log.Printf("Restored %d session events from file", len(events))
 	}
+}
+
+// isContextWindowError 检测是否为 context window 满相关的错误
+func isContextWindowError(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "context window") ||
+		strings.Contains(lower, "token limit") ||
+		strings.Contains(lower, "prompt is too long") ||
+		strings.Contains(lower, "input is too long")
 }
