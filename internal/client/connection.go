@@ -771,6 +771,19 @@ func (c *Client) handleChatInput(userID string, text string) {
 	}
 
 	// 后台模式：任务完成，发送结果给 Server 推送
+	// Bot 模式下等待确保 TypeBackgroundMode 消息被 handleMessage 处理
+	// 避免竞态：Claude 在超时消息到达 Client 之前完成，导致 bgMode 未设置
+	if isBot {
+		for i := 0; i < 10; i++ {
+			c.bgMu.Lock()
+			if c.bgMode {
+				c.bgMu.Unlock()
+				break
+			}
+			c.bgMu.Unlock()
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 	c.bgMu.Lock()
 	bgActive = c.bgMode && c.bgWechatID != ""
 	bgTask := c.bgTaskID
