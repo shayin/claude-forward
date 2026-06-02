@@ -99,8 +99,10 @@ func TestSplitMessage_SentenceBoundary(t *testing.T) {
 
 func TestFindSafeCutPoint_NoMultiByte(t *testing.T) {
 	// 纯 ASCII 文本在换行符处切割
+	// "line1\n" = 6 bytes, "line2\n" = 6 bytes, "line3" = 5 bytes
+	// maxBytes=11 → text[:11] = "line1\nline2"，最后一个 \n 在位置 5，cut=6
 	text := "line1\nline2\nline3"
-	cut := findSafeCutPoint(text, 12)
+	cut := findSafeCutPoint(text, 11)
 	expected := 6 // "line1\n" = 6 bytes
 	if cut != expected {
 		t.Fatalf("expected cut at %d, got %d", expected, cut)
@@ -121,5 +123,109 @@ func TestFindSafeCutPoint_UTF8Fallback(t *testing.T) {
 	// 确保不超过限制
 	if cut > 100 {
 		t.Fatalf("切割点 %d 超过限制 100", cut)
+	}
+}
+
+func TestSplitMessage_CodeBlockIntegrity(t *testing.T) {
+	// 构建一个包含代码块的长消息
+	code := strings.Repeat("fmt.Println(\"hello world\")\n", 150) // ~4500 字节的代码
+	text := "这是一段说明文字。\n\n```go\n" + code + "```\n\n这是代码后面的文字。"
+
+	chunks := splitMessage(text, 2000)
+
+	for i, chunk := range chunks {
+		content := chunk
+		if idx := strings.Index(chunk, " "); idx > 0 && chunk[0] == '[' {
+			content = chunk[idx+1:]
+		}
+
+		// 检查代码块是否闭合
+		inCode := false
+		lineStart := 0
+		for j := 0; j <= len(content); j++ {
+			if j == len(content) || content[j] == '\n' {
+				trimmed := strings.TrimSpace(content[lineStart:j])
+				if strings.HasPrefix(trimmed, "```") {
+					inCode = !inCode
+				}
+				lineStart = j + 1
+			}
+		}
+		if inCode {
+			t.Fatalf("chunk %d 有未闭合的代码块", i)
+		}
+	}
+}
+
+func TestSplitMessage_CodeBlockNotSplit(t *testing.T) {
+	// 短代码块不应被拆分
+	text := "前置文字\n\n```python\nprint('hello')\nprint('world')\n```\n\n后置文字"
+	chunks := splitMessage(text, 50)
+
+	for i, chunk := range chunks {
+		content := chunk
+		if idx := strings.Index(chunk, " "); idx > 0 && chunk[0] == '[' {
+			content = chunk[idx+1:]
+		}
+		// 每个 chunk 都不应该有未闭合的代码块
+		if hasUnclosedCodeBlock(content) {
+			t.Fatalf("chunk %d 有未闭合的代码块: %q", i, content[:80])
+		}
+	}
+}
+
+func TestFindCodeBlockRanges(t *testing.T) {
+	text := "before\n```go\ncode\n```\nafter\n```js\nmore\n```\nend"
+	ranges := findCodeBlockRanges(text)
+
+	if len(ranges) != 2 {
+		t.Fatalf("expected 2 code blocks, got %d", len(ranges))
+	}
+
+	// 第一个代码块应包含 ```go ... ```
+	if !strings.Contains(text[ranges[0][0]:ranges[0][1]], "```go") {
+		t.Fatalf("first range should contain ```go")
+	}
+	// 第二个代码块应包含 ```js ... ```
+	if !strings.Contains(text[ranges[1][0]:ranges[1][1]], "```js") {
+		t.Fatalf("second range should contain ```js")
+	}
+}
+
+func TestHasUnclosedCodeBlock(t *testing.T) {
+	tests := []struct {
+		text     string
+		expected bool
+	}{
+		{"```go\ncode\n```", false},
+		{"```go\ncode\n", true},
+		{"no code here", false},
+		{"```\ncode\n```\n```\nmore", true},
+	}
+
+	for _, tt := range tests {
+		got := hasUnclosedCodeBlock(tt.text)
+		if got != tt.expected {
+			t.Errorf("hasUnclosedCodeBlock(%q) = %v, want %v", tt.text, got, tt.expected)
+		}
+	}
+}
+
+func TestExtractCodeBlockLang(t *testing.T) {
+	tests := []struct {
+		text     string
+		expected string
+	}{
+		{"```go\ncode", "go"},
+		{"```\ncode\n```\n```python\nmore", "python"},
+		{"```\ncode\n```", ""},
+		{"no code", ""},
+	}
+
+	for _, tt := range tests {
+		got := extractCodeBlockLang(tt.text)
+		if got != tt.expected {
+			t.Errorf("extractCodeBlockLang(%q) = %q, want %q", tt.text, got, tt.expected)
+		}
 	}
 }

@@ -709,6 +709,22 @@ func splitMessage(text string, chunkSize int) []string {
 		chunks = append(chunks, text[:cut])
 		text = text[cut:]
 	}
+
+	// 修复被切割的代码块：如果 chunk 有未闭合的 ```，补上闭合标记，下一段补上重开标记
+	for i := 0; i < len(chunks)-1; i++ {
+		if hasUnclosedCodeBlock(chunks[i]) {
+			lang := extractCodeBlockLang(chunks[i])
+			chunks[i] += "\n```\n"
+			if !strings.HasPrefix(strings.TrimSpace(chunks[i+1]), "```") {
+				if lang != "" {
+					chunks[i+1] = "```" + lang + "\n" + chunks[i+1]
+				} else {
+					chunks[i+1] = "```\n" + chunks[i+1]
+				}
+			}
+		}
+	}
+
 	if len(chunks) > 1 {
 		for i := range chunks {
 			chunks[i] = fmt.Sprintf("[%d/%d] %s", i+1, len(chunks), chunks[i])
@@ -719,31 +735,60 @@ func splitMessage(text string, chunkSize int) []string {
 
 // findSafeCutPoint 在 maxBytes 范围内找到一个安全的切割点
 // 优先在段落/空行处切割，其次在句子结尾，最后在 UTF-8 字符边界
+// 同时避免切割在代码块或表格中间
 func findSafeCutPoint(text string, maxBytes int) int {
 	if maxBytes >= len(text) {
 		return len(text)
 	}
 
+	codeBlocks := findCodeBlockRanges(text)
+
+	// adjust: 如果候选切割点在代码块内，尝试移到代码块之后或之前
+	adjust := func(cut int) int {
+		for _, cb := range codeBlocks {
+			if cut > cb[0] && cut < cb[1] {
+				// 优先移到代码块末尾（不超过 maxBytes 的 150%）
+				if cb[1] <= maxBytes+(maxBytes/2) {
+					return cb[1]
+				}
+				// 代码块太长，移到代码块开头之前
+				if cb[0] > 0 {
+					return cb[0]
+				}
+				return 0 // 放弃此候选点
+			}
+		}
+		return cut
+	}
+
 	// 1. 优先在段落边界（空行 \n\n）切割
 	if idx := lastIndexOf(text[:maxBytes], "\n\n"); idx > 0 {
-		return idx + 2
+		if cut := adjust(idx + 2); cut > 0 {
+			return cut
+		}
 	}
 
 	// 2. 检查切割点是否在表格中间，如果是则回退到表格开始之前
 	if cut := avoidTableCut(text, maxBytes); cut > 0 {
-		return cut
+		if cut := adjust(cut); cut > 0 {
+			return cut
+		}
 	}
 
 	// 3. 在换行符处切割
 	if idx := lastIndexOf(text[:maxBytes], "\n"); idx > 0 {
-		return idx + 1
+		if cut := adjust(idx + 1); cut > 0 {
+			return cut
+		}
 	}
 
 	// 4. 在句号、感叹号、问号等句子结尾切割（中文和英文）
 	if idx := lastIndexOfAny(text[:maxBytes], "。！？.!?\n"); idx > 0 {
 		// 跳过句末标点，在后面切割
 		_, size := utf8.DecodeRuneInString(text[idx:])
-		return idx + size
+		if cut := adjust(idx + size); cut > 0 {
+			return cut
+		}
 	}
 
 	// 5. 兜底：确保在 UTF-8 字符边界切割
@@ -822,6 +867,73 @@ func avoidTableCut(text string, maxBytes int) int {
 		return offset + 1 // +1 跳过 \n
 	}
 	return -1
+}
+
+// findCodeBlockRanges 返回所有围栏代码块的 [start, end) 字节偏移范围
+func findCodeBlockRanges(text string) [][2]int {
+	var ranges [][2]int
+	inCode := false
+	codeStart := 0
+	lineStart := 0
+
+	for i := 0; i <= len(text); i++ {
+		if i == len(text) || text[i] == '\n' {
+			trimmed := strings.TrimSpace(text[lineStart:i])
+			if !inCode && strings.HasPrefix(trimmed, "```") {
+				inCode = true
+				codeStart = lineStart
+			} else if inCode && strings.HasPrefix(trimmed, "```") {
+				inCode = false
+				end := i
+				if end < len(text) {
+					end++ // include \n
+				}
+				ranges = append(ranges, [2]int{codeStart, end})
+			}
+			lineStart = i + 1
+		}
+	}
+
+	if inCode {
+		ranges = append(ranges, [2]int{codeStart, len(text)})
+	}
+
+	return ranges
+}
+
+// hasUnclosedCodeBlock 检查文本中是否有未闭合的围栏代码块
+func hasUnclosedCodeBlock(text string) bool {
+	inCode := false
+	lineStart := 0
+	for i := 0; i <= len(text); i++ {
+		if i == len(text) || text[i] == '\n' {
+			if strings.HasPrefix(strings.TrimSpace(text[lineStart:i]), "```") {
+				inCode = !inCode
+			}
+			lineStart = i + 1
+		}
+	}
+	return inCode
+}
+
+// extractCodeBlockLang 提取最后一个未闭合代码块的语言标记
+func extractCodeBlockLang(text string) string {
+	inCode := false
+	lang := ""
+	lineStart := 0
+	for i := 0; i <= len(text); i++ {
+		if i == len(text) || text[i] == '\n' {
+			trimmed := strings.TrimSpace(text[lineStart:i])
+			if strings.HasPrefix(trimmed, "```") {
+				inCode = !inCode
+				if inCode {
+					lang = strings.TrimSpace(trimmed[3:])
+				}
+			}
+			lineStart = i + 1
+		}
+	}
+	return lang
 }
 
 // --- Push API ---
