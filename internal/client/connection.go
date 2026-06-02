@@ -113,6 +113,10 @@ func (c *Client) Connect() error {
 	go c.writePump()
 
 	log.Printf("Connected to server: %s", url)
+
+	// 重连后重发未送达的后台任务结果
+	c.resendPendingResults()
+
 	return nil
 }
 
@@ -600,7 +604,20 @@ func (c *Client) handleChatInput(userID string, text string) {
 	// 记录开始时的连接代数，用于检测断线重连
 	startGen := atomic.LoadInt64(&c.connGen)
 
-	for event := range c.claude.Stream() {
+	// 无事件超时：如果超过 30 分钟没有任何事件，认为 Claude 进程卡死
+	const noOutputTimeout = 30 * time.Minute
+	noOutputTimer := time.NewTimer(noOutputTimeout)
+	defer noOutputTimer.Stop()
+
+	// 用 select 包装事件循环，支持超时终止
+	streamCh := c.claude.Stream()
+	for {
+		select {
+		case event, ok := <-streamCh:
+			if !ok {
+				goto streamEnded
+			}
+			noOutputTimer.Reset(noOutputTimeout)
 		// 从事件中捕获 session_id，分别持久化
 		if event.SessionID != "" {
 			if isBot {
@@ -706,7 +723,16 @@ func (c *Client) handleChatInput(userID string, text string) {
 				c.send <- readyMsg
 			}
 		}
+		case <-noOutputTimer.C:
+			// 30 min no events, Claude stuck, force kill
+			log.Printf("[TIMEOUT] No events for %v, killing Claude process", noOutputTimeout)
+			c.claude.Abort()
+			gotError = true
+			lastErrorMsg = fmt.Sprintf("任务超时：超过 %v 无响应，已自动终止", noOutputTimeout)
+		}
 	}
+
+streamEnded:
 	log.Printf("[BG] Stream ended, checking background mode: bgMode=%v textLen=%d", c.bgMode, len(bgFullText))
 
 	// 非正常结束：收到 error 但没有收到 result（如 context window 满）
@@ -809,7 +835,15 @@ func (c *Client) handleChatInput(userID string, text string) {
 		case c.send <- resultMsg:
 			log.Printf("[BG] BackgroundResult sent successfully")
 		case <-time.After(30 * time.Second):
-			log.Printf("[BG] WARNING: Failed to send BackgroundResult after 30s, dropping")
+			log.Printf("[BG] WARNING: Failed to send BackgroundResult, persisting to disk")
+			c.savePendingResult(protocol.BackgroundResultPayload{
+				TaskID:   bgTask,
+				WechatID: bgWechat,
+				FullText: bgFullText,
+				IsError:  bgIsError,
+				ErrorMsg: bgErrorMsg,
+				CostUSD:  bgCostUSD,
+			})
 		}
 	}
 }
@@ -913,4 +947,63 @@ func isContextWindowError(msg string) bool {
 		strings.Contains(lower, "token limit") ||
 		strings.Contains(lower, "prompt is too long") ||
 		strings.Contains(lower, "input is too long")
+}
+
+// pendingResultsPath 返回待重发的后台结果文件路径
+func (c *Client) pendingResultsPath() string {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	clientID := c.config.Client.ID
+	if clientID == "" {
+		clientID = "default"
+	}
+	return filepath.Join(dir, ".claude-forward", "pending_results", clientID+".json")
+}
+
+// savePendingResult 持久化未发送的后台结果到磁盘
+func (c *Client) savePendingResult(payload protocol.BackgroundResultPayload) {
+	path := c.pendingResultsPath()
+	if path == "" {
+		return
+	}
+	os.MkdirAll(filepath.Dir(path), 0755)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[BG] Failed to marshal pending result: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		log.Printf("[BG] Failed to save pending result: %v", err)
+	} else {
+		log.Printf("[BG] Pending result saved to %s", path)
+	}
+}
+
+// resendPendingResults 重发未发送的后台结果
+func (c *Client) resendPendingResults() {
+	path := c.pendingResultsPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // 没有残留文件
+	}
+	var payload protocol.BackgroundResultPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		log.Printf("[BG] Failed to parse pending result: %v", err)
+		os.Remove(path)
+		return
+	}
+	log.Printf("[BG] Resending pending result: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
+	resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
+	select {
+	case c.send <- resultMsg:
+		os.Remove(path)
+		log.Printf("[BG] Pending result resent successfully")
+	case <-time.After(10 * time.Second):
+		log.Printf("[BG] WARNING: Failed to resend pending result, will retry next reconnect")
+	}
 }
