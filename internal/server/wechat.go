@@ -389,12 +389,27 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 	}
 
 	m.hub.RegisterBotUser(botConn)
-	defer m.hub.CleanupBotUser(botConn)
 
 	if !m.hub.AttachUser(botConn.ID, clientID) {
+		m.hub.CleanupBotUser(botConn)
 		return nil, fmt.Errorf("failed to attach to client")
 	}
-	defer m.hub.DetachUser(botConn.ID)
+
+	// 后台模式标记：超时转后台时延迟清理，避免 Client 收到 bgMode 前的 in-flight 事件丢失
+	wentBackground := false
+	defer func() {
+		if wentBackground {
+			// 延迟 10 秒清理，给 Client 足够时间收到 bgMode 消息并停止发送事件
+			go func() {
+				time.Sleep(10 * time.Second)
+				m.hub.DetachUser(botConn.ID)
+				m.hub.CleanupBotUser(botConn)
+			}()
+		} else {
+			m.hub.DetachUser(botConn.ID)
+			m.hub.CleanupBotUser(botConn)
+		}
+	}()
 
 	// 发送 attach 通知
 	if !safeSend(client.Send, &protocol.Message{
@@ -480,6 +495,7 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 			}
 
 		case <-timeout.C:
+			wentBackground = true
 			taskID := uuid.New().String()
 			bgMsg, _ := protocol.NewMessage(protocol.TypeBackgroundMode, protocol.BackgroundModePayload{
 				TaskID:   taskID,
@@ -490,6 +506,7 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 			return &wechatChatResponse{IsBackground: true, BgTaskID: taskID}, nil
 
 		case <-hardTimeout.C:
+			wentBackground = true
 			taskID := uuid.New().String()
 			bgMsg, _ := protocol.NewMessage(protocol.TypeBackgroundMode, protocol.BackgroundModePayload{
 				TaskID:   taskID,
