@@ -29,16 +29,18 @@ type HookServer struct {
 	timeout  time.Duration
 	settings string // 生成的 settings 文件路径
 	clientID string // 客户端唯一标识
+	envFile  string // 可选，env_file 路径
 }
 
 // NewHookServer 创建并启动 Hook Server
-func NewHookServer(checker *PermissionChecker, timeout time.Duration, sendToUI func(msg *protocol.Message), clientID string) (*HookServer, error) {
+func NewHookServer(checker *PermissionChecker, timeout time.Duration, sendToUI func(msg *protocol.Message), clientID string, envFile string) (*HookServer, error) {
 	hs := &HookServer{
 		checker:  checker,
 		pending:  make(map[string]chan bool),
 		sendToUI: sendToUI,
 		timeout:  timeout,
 		clientID: clientID,
+		envFile:  envFile,
 	}
 
 	mux := http.NewServeMux()
@@ -216,6 +218,24 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 
 	// 从用户 settings.json 读取关键配置（env、model 等）
 	settings := hs.loadUserSettings()
+
+	// 如果配置了 env_file，将文件中的 export 变量合并到 env（settings.json 的 env 优先级更高）
+	if hs.envFile != "" {
+		envFileVars := parseEnvFile(hs.envFile)
+		if len(envFileVars) > 0 {
+			envObj, _ := settings["env"].(map[string]any)
+			if envObj == nil {
+				envObj = make(map[string]any)
+			}
+			for k, v := range envFileVars {
+				if _, exists := envObj[k]; !exists {
+					envObj[k] = v
+				}
+			}
+			settings["env"] = envObj
+			log.Printf("Merged %d env vars from %s into generated settings", len(envFileVars), hs.envFile)
+		}
+	}
 
 	// 覆盖 permissions：全部允许，清空 deny
 	settings["permissions"] = map[string]any{

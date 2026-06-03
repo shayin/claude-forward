@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -62,6 +63,7 @@ type ClaudeConfig struct {
 	Path             string `yaml:"path"`                          // claude 二进制路径，默认 "claude"
 	AllowedTools     string `yaml:"allowed_tools"`                 // 允许的工具列表
 	MaxTurns         int    `yaml:"max_turns"`                     // 最大轮次
+	EnvFile          string `yaml:"env_file"`                      // 可选，指向包含 export KEY=VALUE 的 shell 文件（用于 API 认证等）
 	HookSettingsPath string `yaml:"-"` // Hook 配置文件路径（程序设置，不从 YAML 读取）
 	ClientID         string `yaml:"-"` // 客户端唯一标识（用于区分多客户端文件路径）
 }
@@ -517,8 +519,20 @@ func parseStreamEvent(line, typeStr string) []ClaudeEvent {
 }
 
 // injectUserEnv 从 ~/.claude/settings.json 读取 env 配置并注入到 Claude 进程环境
-// 因为 --setting-sources "" 阻止了 Claude 加载用户 settings，导致 env 中的 API 认证信息丢失
+// 如果配置了 env_file，优先从文件解析 export KEY=VALUE，settings.json 的 env 字段优先级更高
 func (cm *ClaudeManager) injectUserEnv(cmd *exec.Cmd) {
+	cmd.Env = os.Environ()
+
+	// 如果配置了 env_file，解析并注入
+	if cm.config.EnvFile != "" {
+		envFileVars := parseEnvFile(cm.config.EnvFile)
+		for k, v := range envFileVars {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		}
+		log.Printf("Loaded %d env vars from %s", len(envFileVars), cm.config.EnvFile)
+	}
+
+	// settings.json 的 env 字段优先级最高
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -536,9 +550,28 @@ func (cm *ClaudeManager) injectUserEnv(cmd *exec.Cmd) {
 		return
 	}
 
-	// 继承当前进程环境，追加用户 env
-	cmd.Env = os.Environ()
 	for k, v := range settings.Env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
+}
+
+// parseEnvFile 解析包含 export KEY=VALUE 的 shell 文件，返回键值对
+func parseEnvFile(path string) map[string]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("Failed to read env file %s: %v", path, err)
+		return nil
+	}
+
+	result := make(map[string]string)
+	re := regexp.MustCompile(`^export\s+(\w+)=["'](.+?)["']\s*$`)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) == 3 {
+			result[matches[1]] = matches[2]
+		}
+	}
+
+	return result
 }

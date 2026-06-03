@@ -868,7 +868,7 @@ func (c *Client) initPermissionSystem() error {
 		}
 	}
 
-	hs, err := NewHookServer(checker, timeout, sendToUI, c.config.Client.ID)
+	hs, err := NewHookServer(checker, timeout, sendToUI, c.config.Client.ID, c.config.Claude.EnvFile)
 	if err != nil {
 		return fmt.Errorf("failed to start hook server: %w", err)
 	}
