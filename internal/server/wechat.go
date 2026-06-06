@@ -282,8 +282,8 @@ func (m *WeChatManager) handleMessage(idx string, user *wechatUserState, msg ILi
 		}
 	}
 
-	// 处理指令
-	if strings.HasPrefix(text, "/") {
+	// 处理指令（/provider 透传给 client，由 client 端处理）
+	if strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "/provider") {
 		m.handleCommand(idx, user, fromUser, text, sendReply)
 		return
 	}
@@ -615,7 +615,7 @@ func (m *WeChatManager) handleCommand(idx string, user *wechatUserState, fromUse
 		sendReply(fmt.Sprintf("当前绑定：\n- Clawbot: %s\n- Client: %s", user.Route.ClawbotID, binding))
 
 	default:
-		sendReply("未知指令。可用指令：/clients /switch <序号> /new /status")
+		sendReply("未知指令。可用指令：/clients /switch <序号> /new /status /provider")
 	}
 }
 

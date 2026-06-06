@@ -1068,20 +1068,20 @@ func (c *Client) handleProviderCommand(userID string, text string) {
 
 	default:
 		// 切换 provider: /provider deepseek
-		c.switchProvider(subcmd)
-		return
+		if err := c.switchProvider(subcmd); err != nil {
+			c.sendChatError(userID, err.Error())
+			return
+		}
+		envFile := c.claude.GetEnvFile()
+		reply = fmt.Sprintf("已切换到 %s", filepath.Base(envFile))
 	}
 
-	// 发送回复
-	replyMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
-		EventType: "provider_resp",
-		Text:      reply,
-	})
-	replyMsg.To = userID
-	c.send <- replyMsg
+	// 发送回复（用 "text" 事件类型，让 server 端 wechat 能识别）
+	c.sendChatText(userID, reply)
+	c.sendChatReady(userID)
 }
 
-// handleConfigUpdate 处理 TypeConfigUpdate 协议消息
+// handleConfigUpdate 处理 TypeConfigUpdate 协议消息（Web UI）
 func (c *Client) handleConfigUpdate(userID string, envFile string) {
 	if envFile == "" {
 		info := c.getConfigInfo()
@@ -1091,11 +1091,22 @@ func (c *Client) handleConfigUpdate(userID string, envFile string) {
 		c.send <- infoMsg
 		return
 	}
-	c.switchProvider(envFile)
+	if err := c.switchProvider(envFile); err != nil {
+		info := c.getConfigInfo()
+		info.Error = err.Error()
+		infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
+		infoMsg.To = userID
+		c.send <- infoMsg
+		return
+	}
+	info := c.getConfigInfo()
+	infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
+	infoMsg.To = userID
+	c.send <- infoMsg
 }
 
 // switchProvider 切换到指定 provider（接受名称或完整路径）
-func (c *Client) switchProvider(nameOrPath string) {
+func (c *Client) switchProvider(nameOrPath string) error {
 	var envFilePath string
 
 	// 如果是完整路径（含 / 或 .sh），直接使用
@@ -1116,12 +1127,7 @@ func (c *Client) switchProvider(nameOrPath string) {
 
 	// 验证文件存在
 	if _, err := os.Stat(envFilePath); os.IsNotExist(err) {
-		log.Printf("Provider file not found: %s", envFilePath)
-		info := c.getConfigInfo()
-		info.Error = fmt.Sprintf("Provider file not found: %s", envFilePath)
-		infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
-		c.send <- infoMsg
-		return
+		return fmt.Errorf("Provider file not found: %s", envFilePath)
 	}
 
 	// 更新 ClaudeManager 的 env_file
@@ -1135,23 +1141,34 @@ func (c *Client) switchProvider(nameOrPath string) {
 	}
 
 	log.Printf("Provider switched to: %s", envFilePath)
+	return nil
+}
 
-	// 发送确认
-	info := c.getConfigInfo()
-	infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
-	c.send <- infoMsg
-
-	// 同时发送 chat message 通知当前用户
-	chatMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
-		EventType: "provider_resp",
-		Text:      fmt.Sprintf("已切换到 %s", filepath.Base(envFilePath)),
+// sendChatText 发送聊天文本消息给用户
+func (c *Client) sendChatText(userID string, text string) {
+	msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
+		EventType: "text",
+		Text:      text,
 	})
-	c.userMu.RLock()
-	if c.attachedUser != "" {
-		chatMsg.To = c.attachedUser
-	}
-	c.userMu.RUnlock()
-	c.send <- chatMsg
+	msg.To = userID
+	c.send <- msg
+}
+
+// sendChatReady 发送 chat_ready 给用户
+func (c *Client) sendChatReady(userID string) {
+	msg, _ := protocol.NewMessage(protocol.TypeChatReady, nil)
+	msg.To = userID
+	c.send <- msg
+}
+
+// sendChatError 发送 chat_error 给用户
+func (c *Client) sendChatError(userID string, errMsg string) {
+	msg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
+		Code:    500,
+		Message: errMsg,
+	})
+	msg.To = userID
+	c.send <- msg
 }
 
 // getConfigInfo 获取当前配置信息
