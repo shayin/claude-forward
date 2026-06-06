@@ -60,12 +60,13 @@ type ClaudeManager struct {
 
 // ClaudeConfig Claude 相关配置
 type ClaudeConfig struct {
-	Path             string `yaml:"path"`                          // claude 二进制路径，默认 "claude"
-	AllowedTools     string `yaml:"allowed_tools"`                 // 允许的工具列表
-	MaxTurns         int    `yaml:"max_turns"`                     // 最大轮次
-	EnvFile          string `yaml:"env_file"`                      // 可选，指向包含 export KEY=VALUE 的 shell 文件（用于 API 认证等）
-	HookSettingsPath string `yaml:"-"` // Hook 配置文件路径（程序设置，不从 YAML 读取）
-	ClientID         string `yaml:"-"` // 客户端唯一标识（用于区分多客户端文件路径）
+	Path             string `yaml:"path"`          // claude 二进制路径，默认 "claude"
+	AllowedTools     string `yaml:"allowed_tools"` // 允许的工具列表
+	MaxTurns         int    `yaml:"max_turns"`     // 最大轮次
+	EnvFile          string `yaml:"env_file"`      // 可选，指向包含 export KEY=VALUE 的 shell 文件（用于 API 认证等）
+	ProviderDir      string `yaml:"provider_dir"`  // 可选，providers 脚本目录，用于 /provider list 扫描
+	HookSettingsPath string `yaml:"-"`             // Hook 配置文件路径（程序设置，不从 YAML 读取）
+	ClientID         string `yaml:"-"`             // 客户端唯一标识（用于区分多客户端文件路径）
 }
 
 // NewClaudeManager 创建 Claude 管理器
@@ -87,6 +88,20 @@ func (cm *ClaudeManager) SetHookSettingsPath(path string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.config.HookSettingsPath = path
+}
+
+// UpdateEnvFile 运行时更新 env_file（用于切换 provider）
+func (cm *ClaudeManager) UpdateEnvFile(path string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.config.EnvFile = path
+}
+
+// GetEnvFile 返回当前 env_file 路径
+func (cm *ClaudeManager) GetEnvFile() string {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.config.EnvFile
 }
 
 // SessionID 返回当前会话 ID
@@ -518,40 +533,35 @@ func parseStreamEvent(line, typeStr string) []ClaudeEvent {
 	return nil
 }
 
-// injectUserEnv 从 ~/.claude/settings.json 读取 env 配置并注入到 Claude 进程环境
-// 如果配置了 env_file，优先从文件解析 export KEY=VALUE，settings.json 的 env 字段优先级更高
+// injectUserEnv 注入环境变量到 Claude 子进程
+// 优先级：env_file > settings.json env > os.Environ()
+// env_file 是显式配置，应覆盖 settings.json 的全局默认值
 func (cm *ClaudeManager) injectUserEnv(cmd *exec.Cmd) {
 	cmd.Env = os.Environ()
 
-	// 如果配置了 env_file，解析并注入
+	// settings.json 的 env（全局默认值，优先级较低）
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		data, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
+		if err == nil {
+			var settings struct {
+				Env map[string]string `json:"env"`
+			}
+			if err := json.Unmarshal(data, &settings); err == nil {
+				for k, v := range settings.Env {
+					cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+				}
+			}
+		}
+	}
+
+	// env_file 最后注入，覆盖 settings.json 的默认值
 	if cm.config.EnvFile != "" {
 		envFileVars := parseEnvFile(cm.config.EnvFile)
 		for k, v := range envFileVars {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 		}
 		log.Printf("Loaded %d env vars from %s", len(envFileVars), cm.config.EnvFile)
-	}
-
-	// settings.json 的 env 字段优先级最高
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-
-	data, err := os.ReadFile(filepath.Join(homeDir, ".claude", "settings.json"))
-	if err != nil {
-		return
-	}
-
-	var settings struct {
-		Env map[string]string `json:"env"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil || len(settings.Env) == 0 {
-		return
-	}
-
-	for k, v := range settings.Env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 }
 

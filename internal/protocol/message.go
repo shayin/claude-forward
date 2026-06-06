@@ -52,6 +52,10 @@ const (
 	TypeBackgroundMode   MessageType = "background_mode"    // Server→Client: 当前任务转后台模式
 	TypeBackgroundStart  MessageType = "background_start"   // Server→Client: 启动新后台任务
 	TypeBackgroundResult MessageType = "background_result"   // Client→Server: 后台任务完成
+
+	// 配置管理
+	TypeConfigUpdate MessageType = "config_update" // UI/Server→Client: 更新运行时配置
+	TypeConfigInfo   MessageType = "config_info"   // Client→UI/Server: 返回当前配置信息
 )
 
 // Message WebSocket 消息格式
@@ -214,4 +218,16 @@ func MustMarshal(v any) json.RawMessage {
 // ParsePayload 解析消息载荷
 func (m *Message) ParsePayload(v any) error {
 	return json.Unmarshal(m.Payload, v)
+}
+
+// ConfigUpdatePayload 配置更新载荷（UI/Server→Client）
+type ConfigUpdatePayload struct {
+	EnvFile string `json:"env_file,omitempty"` // 新的 env_file 路径
+}
+
+// ConfigInfoPayload 当前配置信息（Client→UI/Server）
+type ConfigInfoPayload struct {
+	EnvFile   string   `json:"env_file"`             // 当前 env_file 路径
+	Providers []string `json:"providers,omitempty"`  // 可用 provider 列表
+	Error     string   `json:"error,omitempty"`      // 错误信息
 }

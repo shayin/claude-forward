@@ -19,4 +19,6 @@ claude:
   path: ""                            # claude 二进制路径，留空默认使用 PATH 中的 claude
   allowed_tools: "Bash,Read,Edit,Write,Glob,Grep"  # 允许 Claude 使用的工具
   max_turns: 50                       # 单次对话最大轮次
-  env_file: ""                        # 可选，指向包含 export KEY=VALUE 的 shell 文件（用于 API 认证等），留空使用 settings.json 的 env
+  env_file: ""                        # 可选，指向包含 export KEY=VALUE 的 shell 文件（用于 API 认证等）
+                                      # 优先级高于 ~/.claude/settings.json 的 env 字段
+  provider_dir: "~/.claude/providers" # 可选，providers 脚本目录，用于 /provider list 扫描和快速切换

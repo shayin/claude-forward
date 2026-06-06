@@ -87,6 +87,16 @@ func (hs *HookServer) SettingsPath() string {
 	return hs.settings
 }
 
+// UpdateEnvFile 运行时更新 env_file 并重新生成 settings 文件
+func (hs *HookServer) UpdateEnvFile(envFile string) error {
+	hs.mu.Lock()
+	hs.envFile = envFile
+	hs.mu.Unlock()
+
+	_, err := hs.GenerateSettingsFile()
+	return err
+}
+
 // HandleResponse 处理来自 Web UI 的权限审批结果
 func (hs *HookServer) HandleResponse(requestID string, approved bool) {
 	hs.mu.Lock()
@@ -219,7 +229,7 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 	// 从用户 settings.json 读取关键配置（env、model 等）
 	settings := hs.loadUserSettings()
 
-	// 如果配置了 env_file，将文件中的 export 变量合并到 env（settings.json 的 env 优先级更高）
+	// env_file 的变量优先于 settings.json 的 env（显式配置覆盖全局默认值）
 	if hs.envFile != "" {
 		envFileVars := parseEnvFile(hs.envFile)
 		if len(envFileVars) > 0 {
@@ -228,9 +238,7 @@ func (hs *HookServer) GenerateSettingsFile() (string, error) {
 				envObj = make(map[string]any)
 			}
 			for k, v := range envFileVars {
-				if _, exists := envObj[k]; !exists {
-					envObj[k] = v
-				}
+				envObj[k] = v
 			}
 			settings["env"] = envObj
 			log.Printf("Merged %d env vars from %s into generated settings", len(envFileVars), hs.envFile)

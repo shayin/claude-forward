@@ -426,6 +426,11 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if err := msg.ParsePayload(&payload); err != nil {
 			return
 		}
+		// 检查是否为客户端命令（如 /provider）
+		if strings.HasPrefix(payload.Text, "/provider") {
+			go c.handleProviderCommand(msg.From, payload.Text)
+			return
+		}
 		// 将用户消息存入 sessionEvents，支持断线重连后完整回放
 		userMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 			EventType: "user_message",
@@ -487,6 +492,20 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.bgTaskID = payload.TaskID
 		c.bgWechatID = payload.WechatID
 		c.bgMu.Unlock()
+
+	case protocol.TypeConfigUpdate:
+		var payload protocol.ConfigUpdatePayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			log.Printf("Failed to parse config_update: %v", err)
+			return
+		}
+		c.handleConfigUpdate(msg.From, payload.EnvFile)
+
+	case protocol.TypeConfigInfo:
+		info := c.getConfigInfo()
+		infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
+		infoMsg.To = msg.From
+		c.send <- infoMsg
 	}
 }
 
@@ -1006,4 +1025,167 @@ func (c *Client) resendPendingResults() {
 	case <-time.After(10 * time.Second):
 		log.Printf("[BG] WARNING: Failed to resend pending result, will retry next reconnect")
 	}
+}
+
+// handleProviderCommand 处理 /provider 聊天命令
+func (c *Client) handleProviderCommand(userID string, text string) {
+	parts := strings.Fields(text) // "/provider", subcommand/name
+	subcmd := ""
+	if len(parts) >= 2 {
+		subcmd = parts[1]
+	}
+
+	var reply string
+
+	switch subcmd {
+	case "list":
+		providers := c.listProviders()
+		if len(providers) == 0 {
+			reply = "没有找到可用的 provider（请检查 provider_dir 配置）"
+		} else {
+			current := c.claude.GetEnvFile()
+			reply = "可用 providers:\n"
+			for _, p := range providers {
+				marker := "  "
+				if current != "" && strings.Contains(current, p+".sh") {
+					marker = "* "
+				}
+				reply += fmt.Sprintf("  %s%s\n", marker, p)
+			}
+			reply += "\n使用 /provider <name> 切换"
+		}
+
+	case "status":
+		envFile := c.claude.GetEnvFile()
+		if envFile == "" {
+			reply = "当前未配置 env_file，使用 settings.json 的默认 env"
+		} else {
+			reply = fmt.Sprintf("当前 provider: %s", envFile)
+		}
+
+	case "":
+		reply = "用法:\n  /provider list    - 列出可用 providers\n  /provider <name>  - 切换到指定 provider\n  /provider status  - 查看当前 provider"
+
+	default:
+		// 切换 provider: /provider deepseek
+		c.switchProvider(subcmd)
+		return
+	}
+
+	// 发送回复
+	replyMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
+		EventType: "provider_resp",
+		Text:      reply,
+	})
+	replyMsg.To = userID
+	c.send <- replyMsg
+}
+
+// handleConfigUpdate 处理 TypeConfigUpdate 协议消息
+func (c *Client) handleConfigUpdate(userID string, envFile string) {
+	if envFile == "" {
+		info := c.getConfigInfo()
+		info.Error = "env_file is required"
+		infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
+		infoMsg.To = userID
+		c.send <- infoMsg
+		return
+	}
+	c.switchProvider(envFile)
+}
+
+// switchProvider 切换到指定 provider（接受名称或完整路径）
+func (c *Client) switchProvider(nameOrPath string) {
+	var envFilePath string
+
+	// 如果是完整路径（含 / 或 .sh），直接使用
+	if strings.Contains(nameOrPath, "/") || strings.HasSuffix(nameOrPath, ".sh") {
+		envFilePath = nameOrPath
+	} else {
+		// 是 provider 名称，拼接路径
+		providerDir := c.config.Claude.ProviderDir
+		if providerDir == "" {
+			providerDir = filepath.Join(os.Getenv("HOME"), ".claude", "providers")
+		}
+		// 展开 ~ 前缀
+		if strings.HasPrefix(providerDir, "~/") {
+			providerDir = filepath.Join(os.Getenv("HOME"), providerDir[2:])
+		}
+		envFilePath = filepath.Join(providerDir, nameOrPath+".sh")
+	}
+
+	// 验证文件存在
+	if _, err := os.Stat(envFilePath); os.IsNotExist(err) {
+		log.Printf("Provider file not found: %s", envFilePath)
+		info := c.getConfigInfo()
+		info.Error = fmt.Sprintf("Provider file not found: %s", envFilePath)
+		infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
+		c.send <- infoMsg
+		return
+	}
+
+	// 更新 ClaudeManager 的 env_file
+	c.claude.UpdateEnvFile(envFilePath)
+
+	// 重新生成 hooks-settings.json
+	if c.hookServer != nil {
+		if err := c.hookServer.UpdateEnvFile(envFilePath); err != nil {
+			log.Printf("Failed to regenerate settings: %v", err)
+		}
+	}
+
+	log.Printf("Provider switched to: %s", envFilePath)
+
+	// 发送确认
+	info := c.getConfigInfo()
+	infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
+	c.send <- infoMsg
+
+	// 同时发送 chat message 通知当前用户
+	chatMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
+		EventType: "provider_resp",
+		Text:      fmt.Sprintf("已切换到 %s", filepath.Base(envFilePath)),
+	})
+	c.userMu.RLock()
+	if c.attachedUser != "" {
+		chatMsg.To = c.attachedUser
+	}
+	c.userMu.RUnlock()
+	c.send <- chatMsg
+}
+
+// getConfigInfo 获取当前配置信息
+func (c *Client) getConfigInfo() protocol.ConfigInfoPayload {
+	return protocol.ConfigInfoPayload{
+		EnvFile:   c.claude.GetEnvFile(),
+		Providers: c.listProviders(),
+	}
+}
+
+// listProviders 扫描 provider_dir 下的可用 provider 列表
+func (c *Client) listProviders() []string {
+	providerDir := c.config.Claude.ProviderDir
+	if providerDir == "" {
+		providerDir = filepath.Join(os.Getenv("HOME"), ".claude", "providers")
+	}
+	if strings.HasPrefix(providerDir, "~/") {
+		providerDir = filepath.Join(os.Getenv("HOME"), providerDir[2:])
+	}
+
+	entries, err := os.ReadDir(providerDir)
+	if err != nil {
+		return nil
+	}
+
+	var providers []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".sh") && name != "init.sh" {
+			providers = append(providers, strings.TrimSuffix(name, ".sh"))
+		}
+	}
+	return providers
 }
