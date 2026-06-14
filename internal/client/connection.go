@@ -41,9 +41,6 @@ type Client struct {
 	sentUpTo      int         // 已发送到用户的事件索引（用于去重）
 	sessionMu     sync.Mutex  // 保护 sessionEvents 和 sentUpTo
 
-	// Bot API 独立会话（与 Web UI 隔离）
-	botSessionID string
-
 	// 后台模式：超时后任务转为后台继续运行
 	// 受 bgMu 保护：handleMessage 写入，handleChatInput 读取/清零
 	bgMu       sync.Mutex
@@ -446,7 +443,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if strings.HasPrefix(msg.From, "bot-") {
 			// Bot API：仅重置 Bot 自己的 session
 			log.Printf("Starting new Bot session")
-			c.botSessionID = ""
+			c.claude.SetBotSessionID("")
 		} else {
 			// Web UI：重置主会话和事件
 			log.Printf("Starting new Claude session")
@@ -574,7 +571,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 	isBot := strings.HasPrefix(userID, "bot-")
 	var resumeSessionID string
 	if isBot {
-		resumeSessionID = c.botSessionID
+		resumeSessionID = c.claude.BotSessionID()
 	} else {
 		resumeSessionID = c.claude.SessionID()
 	}
@@ -652,7 +649,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 		// 从事件中捕获 session_id，分别持久化
 		if event.SessionID != "" {
 			if isBot {
-				c.botSessionID = event.SessionID
+				c.claude.SetBotSessionID(event.SessionID)
 			} else {
 				c.claude.SetSessionID(event.SessionID)
 			}
@@ -795,7 +792,7 @@ streamEnded:
 			// 自动重置 bot session
 			if isContextWindowError(lastErrorMsg) {
 				log.Printf("[CTX] Context window full, auto-resetting bot session")
-				c.botSessionID = ""
+				c.claude.SetBotSessionID("")
 			}
 		} else {
 			// Web UI：发送 chat_error + chat_ready 恢复前端交互

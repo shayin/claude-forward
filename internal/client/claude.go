@@ -49,13 +49,14 @@ type ClaudeEvent struct {
 
 // ClaudeManager 管理 Claude CLI 调用
 type ClaudeManager struct {
-	config    ClaudeConfig
-	sessionID string     // Claude 会话 ID，用于 --resume
-	cmd       *exec.Cmd  // 当前运行的 Claude 进程
-	cancel    context.CancelFunc
-	events    chan ClaudeEvent
-	mu        sync.Mutex
-	running   bool
+	config       ClaudeConfig
+	sessionID    string // Web UI 的 Claude 会话 ID，用于 --resume
+	botSessionID string // Bot API（微信端）的 Claude 会话 ID，独立持久化
+	cmd          *exec.Cmd  // 当前运行的 Claude 进程
+	cancel       context.CancelFunc
+	events       chan ClaudeEvent
+	mu           sync.Mutex
+	running      bool
 }
 
 // ClaudeConfig Claude 相关配置
@@ -80,6 +81,7 @@ func NewClaudeManager(config ClaudeConfig) *ClaudeManager {
 	}
 	// 从文件恢复上次的 session_id
 	cm.loadSessionID()
+	cm.loadBotSessionID()
 	return cm
 }
 
@@ -117,6 +119,21 @@ func (cm *ClaudeManager) SetSessionID(id string) {
 	defer cm.mu.Unlock()
 	cm.sessionID = id
 	cm.saveSessionID()
+}
+
+// BotSessionID 返回 Bot API（微信端）的会话 ID
+func (cm *ClaudeManager) BotSessionID() string {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.botSessionID
+}
+
+// SetBotSessionID 设置 Bot API 的会话 ID，并持久化
+func (cm *ClaudeManager) SetBotSessionID(id string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.botSessionID = id
+	cm.saveBotSessionID()
 }
 
 // IsRunning 是否正在运行
@@ -325,6 +342,51 @@ func (cm *ClaudeManager) loadSessionID() {
 	if id != "" {
 		cm.sessionID = id
 		log.Printf("Restored session_id from file: %s", id)
+	}
+}
+
+// botSessionIDPath 返回 Bot API session_id 持久化文件路径（按 clientID 区分）
+// 与 Web UI 的 session_id 文件隔离，避免不同端互相覆盖对话上下文
+func (cm *ClaudeManager) botSessionIDPath() string {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	name := "session_id_bot"
+	if cm.config.ClientID != "" {
+		name = fmt.Sprintf("session_id_bot_%s", cm.config.ClientID)
+	}
+	return filepath.Join(dir, ".claude-forward", name)
+}
+
+// saveBotSessionID 将 bot session_id 写入文件（调用方需持有 cm.mu）
+func (cm *ClaudeManager) saveBotSessionID() {
+	path := cm.botSessionIDPath()
+	if path == "" {
+		return
+	}
+	os.MkdirAll(filepath.Dir(path), 0755)
+	if cm.botSessionID == "" {
+		os.Remove(path)
+	} else {
+		os.WriteFile(path, []byte(cm.botSessionID), 0644)
+	}
+}
+
+// loadBotSessionID 从文件恢复 bot session_id
+func (cm *ClaudeManager) loadBotSessionID() {
+	path := cm.botSessionIDPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	id := strings.TrimSpace(string(data))
+	if id != "" {
+		cm.botSessionID = id
+		log.Printf("Restored bot session_id from file: %s", id)
 	}
 }
 
