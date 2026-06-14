@@ -85,6 +85,13 @@ build() {
         cp "$BINARY" "$INSTALLED"
         print_step "已同步到 $INSTALLED"
     fi
+
+    # 同步到全局命令 cf（如果之前安装过）
+    CF_BIN="/usr/local/bin/cf"
+    if [ -f "$CF_BIN" ]; then
+        cp "$BINARY" "$CF_BIN"
+        print_step "已同步到 $CF_BIN"
+    fi
 }
 
 # 启动
