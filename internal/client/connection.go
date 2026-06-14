@@ -44,9 +44,10 @@ type Client struct {
 	// 后台模式：超时后任务转为后台继续运行
 	// 受 bgMu 保护：handleMessage 写入，handleChatInput 读取/清零
 	bgMu       sync.Mutex
-	bgMode     bool   // 当前是否处于后台模式
-	bgTaskID   string // 后台任务 ID
-	bgWechatID string // 完成后推送给谁
+	bgMode         bool   // 当前是否处于后台模式
+	bgTaskID       string // 后台任务 ID
+	bgWechatID     string // 完成后推送给谁
+	currentWechatID string // 当前正在处理的微信用户 ID（来自 ChatInputPayload.WechatID）
 }
 
 // NewClient 创建客户端
@@ -428,6 +429,12 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 			go c.handleProviderCommand(msg.From, payload.Text)
 			return
 		}
+		// 记录当前微信用户 ID（来自 Server 下发），供断线自动后台时使用
+		if payload.WechatID != "" {
+			c.bgMu.Lock()
+			c.currentWechatID = payload.WechatID
+			c.bgMu.Unlock()
+		}
 		// 将用户消息存入 sessionEvents，支持断线重连后完整回放
 		userMsg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 			EventType: "user_message",
@@ -710,7 +717,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 			if !bgActive && atomic.LoadInt64(&c.connGen) != startGen {
 				c.bgMode = true
 				c.bgTaskID = fmt.Sprintf("auto-bg-%d", time.Now().UnixMilli())
-				c.bgWechatID = strings.TrimPrefix(userID, "bot-")
+				c.bgWechatID = c.currentWechatID
 				bgActive = true
 				log.Printf("[BG] Connection lost mid-task, auto-switched to background mode: taskID=%s wechatID=%s", c.bgTaskID, c.bgWechatID)
 			}
@@ -769,7 +776,9 @@ streamEnded:
 		if isBot {
 			// Bot（微信端）：主动推送错误通知
 			if !bgActive {
-				wechatID := strings.TrimPrefix(userID, "bot-")
+				c.bgMu.Lock()
+				wechatID := c.currentWechatID
+				c.bgMu.Unlock()
 				if wechatID != "" {
 					pushText := lastErrorMsg
 					if isContextWindowError(lastErrorMsg) {

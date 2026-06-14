@@ -421,7 +421,8 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 
 	// 发送 chat_input
 	chatMsg, err := protocol.NewMessage(protocol.TypeChatInput, protocol.ChatInputPayload{
-		Text: text,
+		Text:     text,
+		WechatID: wechatID,
 	})
 	if err != nil {
 		return nil, err

@@ -129,7 +129,8 @@ type ErrorPayload struct {
 
 // ChatInputPayload 聊天输入载荷
 type ChatInputPayload struct {
-	Text string `json:"text"`
+	Text     string `json:"text"`
+	WechatID string `json:"wechat_id,omitempty"` // 微信用户 ID（Server 端 chatViaHub 下发，供 Client 自动后台时使用）
 }
 
 // ChatMessagePayload 聊天消息载荷（Claude 输出事件）
