@@ -479,8 +479,14 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 						result.FullText = payload.Text
 					}
 					result.CostUSD = payload.CostUSD
-				case "tool_start":
-					result.ToolCalls = append(result.ToolCalls, payload.ToolName)
+				case "tool_start", "tool_end", "thinking":
+					// 任何来自 Claude 的事件都说明进程活跃，应重置超时。
+					// Claude Code 任务普遍包含长时间工具调用（Read/Bash/Agent 等），
+					// 工具执行期间没有文字输出但进程仍在工作，必须 reset 否则误判超时。
+					if payload.EventType == "tool_start" {
+						result.ToolCalls = append(result.ToolCalls, payload.ToolName)
+					}
+					timeout.Reset(3 * time.Minute)
 				}
 
 			case protocol.TypeChatReady:

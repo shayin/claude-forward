@@ -606,6 +606,18 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 	// 流式转发事件到用户
 	// åå°æ¨¡å¼ï¼æ¶éå®æ´ç»æç¨äºå¼æ­¥æ¨é
+	// 新任务启动，清除上次后台模式的残留状态。
+	// 否则上一次 bgMode=true 会让新任务的事件走 bg 路径（收集到 bgFullText），
+	// Server 端 chatViaHub 收不到任何事件，3 分钟后必然超时，
+	// 又发 background_mode 把 bgMode 设回 true，形成"每句话都误报超时"的死循环。
+	if isBot {
+		c.bgMu.Lock()
+		c.bgMode = false
+		c.bgTaskID = ""
+		c.bgWechatID = ""
+		c.bgMu.Unlock()
+	}
+
 	var bgFullText string
 	var bgHasStreamDelta bool
 	var bgCostUSD float64
