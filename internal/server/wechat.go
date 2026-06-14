@@ -749,11 +749,9 @@ func splitMessage(text string, chunkSize int) []string {
 		}
 	}
 
-	if len(chunks) > 1 {
-		for i := range chunks {
-			chunks[i] = fmt.Sprintf("[%d/%d] %s", i+1, len(chunks), chunks[i])
-		}
-	}
+	// 不再添加 [i/n] 前缀：前缀会让 chunk 行首的 md 标记（#/-/|/>/```）失效，
+	// 同时让上面的代码块修复成果失效（``` 不再在行首）。
+	// 多段消息天然按时间排序到达，用户能感知顺序，不需要序号提示。
 	return chunks
 }
 
