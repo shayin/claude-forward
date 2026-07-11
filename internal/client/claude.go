@@ -52,7 +52,6 @@ type ClaudeManager struct {
 	config       ClaudeConfig
 	sessionID    string // Web UI 的 Claude 会话 ID，用于 --resume
 	botSessionID string // Bot API（微信端）的 Claude 会话 ID，独立持久化
-	cmd          *exec.Cmd  // 当前运行的 Claude 进程
 	cancel       context.CancelFunc
 	events       chan ClaudeEvent
 	mu           sync.Mutex
@@ -146,17 +145,18 @@ func (cm *ClaudeManager) IsRunning() bool {
 // SendMessage 发送消息给 Claude，启动一个 claude -p 子进程
 // resumeSessionID 非空时使用 --resume 续接该会话，为空则启动全新会话
 func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error {
+	ctx, cancel := context.WithCancel(context.Background())
 	cm.mu.Lock()
 	if cm.running {
 		cm.mu.Unlock()
+		cancel()
 		return fmt.Errorf("claude is still processing")
 	}
-	cm.running = true
-	cm.events = make(chan ClaudeEvent, 256)
-	cm.mu.Unlock()
-
-	ctx, cancel := context.WithCancel(context.Background())
+	// cancel 在锁内赋值，避免与 Abort() 竞态导致孤儿进程
 	cm.cancel = cancel
+	cm.events = make(chan ClaudeEvent, 256)
+	cm.running = true
+	cm.mu.Unlock()
 
 	// 构建命令参数
 	args := []string{"-p", text, "--output-format", "stream-json", "--verbose"}
@@ -203,8 +203,6 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 		cancel()
 		return fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
-
-	cm.cmd = cmd
 
 	if err := cmd.Start(); err != nil {
 		cm.setRunning(false)
@@ -261,7 +259,9 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 	return nil
 }
 
-// Stream 返回事件 channel
+// Stream 返回事件 channel。
+// 约束：必须在 SendMessage 返回成功后调用，且调用方保证无并发 SendMessage
+//（cm.events 在 SendMessage 内创建、goroutine 内 close，依赖 happens-before 时序）。
 func (cm *ClaudeManager) Stream() <-chan ClaudeEvent {
 	return cm.events
 }

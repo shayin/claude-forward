@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,10 +25,13 @@ type Client struct {
 	send          chan *protocol.Message
 	tmux          *TmuxManager
 	claude        *ClaudeManager
-	hookServer    *HookServer // 权限 Hook 服务器
+	codex         *CodexManager // codex CLI 引擎（bot 通道可选）
+	botEngine     string        // bot 通道当前引擎："claude"（默认）| "codex"
+	hookServer    *HookServer   // 权限 Hook 服务器
 	attachedUser  string      // 当前连接的用户 ID
 	userMu        sync.RWMutex
 	mu            sync.Mutex
+	engineMu      sync.Mutex // 保护 botEngine 读写 + 引擎启动/切换临界区（消除 TOCTOU）
 	ctx           context.Context
 	cancel        context.CancelFunc
 	forwardCancel context.CancelFunc // 用于停止 forwarding goroutine
@@ -136,9 +140,12 @@ func (c *Client) Disconnect() {
 
 // Shutdown 优雅关闭：停止 Claude 子进程、停止 Run 协程、断开连接
 func (c *Client) Shutdown() {
-	// 1. 停止 Claude 子进程
+	// 1. 停止 Claude / Codex 子进程
 	if c.claude != nil {
 		c.claude.Abort()
+	}
+	if c.codex != nil {
+		c.codex.Abort()
 	}
 	// 2. 取消客户端上下文（停止 Run 重连循环）
 	c.cancel()
@@ -158,6 +165,11 @@ func (c *Client) Run() {
 	// 初始化 Claude 管理器
 	c.config.Claude.ClientID = c.config.Client.ID
 	c.claude = NewClaudeManager(c.config.Claude)
+
+	// 初始化 Codex 管理器（bot 通道可选引擎）
+	c.config.Codex.ClientID = c.config.Client.ID
+	c.codex = NewCodexManager(c.config.Codex)
+	c.botEngine = "claude" // 默认引擎，重启回 claude
 
 	// 从磁盘恢复会话事件
 	c.loadSessionEvents()
@@ -424,9 +436,13 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		if err := msg.ParsePayload(&payload); err != nil {
 			return
 		}
-		// 检查是否为客户端命令（如 /provider）
+		// 检查是否为客户端命令（如 /provider、/engine）
 		if strings.HasPrefix(payload.Text, "/provider") {
 			go c.handleProviderCommand(msg.From, payload.Text)
+			return
+		}
+		if strings.HasPrefix(payload.Text, "/engine") {
+			go c.handleEngineCommand(msg.From, payload.Text)
 			return
 		}
 		// 记录当前微信用户 ID（来自 Server 下发），供断线自动后台时使用
@@ -448,9 +464,13 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 
 	case protocol.TypeNewSession:
 		if strings.HasPrefix(msg.From, "bot-") {
-			// Bot API：仅重置 Bot 自己的 session
-			log.Printf("Starting new Bot session")
-			c.claude.SetBotSessionID("")
+			// Bot API：仅重置 Bot 自己的 session（按当前引擎）
+			log.Printf("Starting new Bot session (engine=%s)", c.botEngineSafe())
+			if c.botEngineSafe() == "codex" {
+				c.codex.SetBotSessionID("")
+			} else {
+				c.claude.SetBotSessionID("")
+			}
 		} else {
 			// Web UI：重置主会话和事件
 			log.Printf("Starting new Claude session")
@@ -576,37 +596,48 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 	// Bot API 使用独立 session（与 Web UI 隔离），不存 sessionEvents
 	isBot := strings.HasPrefix(userID, "bot-")
-	var resumeSessionID string
-	if isBot {
-		resumeSessionID = c.claude.BotSessionID()
-	} else {
-		resumeSessionID = c.claude.SessionID()
-	}
 
 	// 立即发送确认，让 UI 知道消息已被接收
 	ackMsg, _ := protocol.NewMessage(protocol.TypeChatAck, nil)
 	ackMsg.To = currentUserID()
 	c.send <- ackMsg
 
-	if c.claude.IsRunning() {
+	// 引擎切换临界区：读 botEngine → 启动 runner 必须原子，
+	// 避免与 handleEngineCommand 的切换竞态（TOCTOU）导致消息落到错误引擎
+	c.engineMu.Lock()
+	var runner Runner = c.claude
+	if isBot && c.botEngine == "codex" {
+		runner = c.codex
+	}
+	var resumeSessionID string
+	if isBot {
+		resumeSessionID = runner.BotSessionID()
+	} else {
+		resumeSessionID = runner.SessionID()
+	}
+
+	if runner.IsRunning() {
+		c.engineMu.Unlock()
 		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
 			Code:    409,
-			Message: "Claude is still processing, please wait",
+			Message: "engine is still processing, please wait",
 		})
 		errMsg.To = currentUserID()
 		c.send <- errMsg
 		return
 	}
 
-	if err := c.claude.SendMessage(text, resumeSessionID); err != nil {
+	if err := runner.SendMessage(text, resumeSessionID); err != nil {
+		c.engineMu.Unlock()
 		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
 			Code:    500,
-			Message: fmt.Sprintf("Failed to start Claude: %v", err),
+			Message: fmt.Sprintf("Failed to start engine: %v", err),
 		})
 		errMsg.To = currentUserID()
 		c.send <- errMsg
 		return
 	}
+	c.engineMu.Unlock()
 
 	// 流式转发事件到用户
 	// åå°æ¨¡å¼ï¼æ¶éå®æ´ç»æç¨äºå¼æ­¥æ¨é
@@ -645,7 +676,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 	defer noOutputTimer.Stop()
 
 	// 用 select 包装事件循环，支持超时终止
-	streamCh := c.claude.Stream()
+	streamCh := runner.Stream()
 	for {
 		select {
 		case event, ok := <-streamCh:
@@ -656,9 +687,9 @@ func (c *Client) handleChatInput(userID string, text string) {
 		// 从事件中捕获 session_id，分别持久化
 		if event.SessionID != "" {
 			if isBot {
-				c.claude.SetBotSessionID(event.SessionID)
+				runner.SetBotSessionID(event.SessionID)
 			} else {
-				c.claude.SetSessionID(event.SessionID)
+				runner.SetSessionID(event.SessionID)
 			}
 		}
 
@@ -694,8 +725,14 @@ func (c *Client) handleChatInput(userID string, text string) {
 				bgHasStreamDelta = true
 				bgFullText += event.Text
 			case EventText:
+				// codex 一轮可能产出多个 agent_message（EventText），累加以免覆盖
+				// cc 通常单个 EventText，bgFullText 为空时走 else 分支，行为不变
 				if !bgHasStreamDelta {
-					bgFullText = event.Text
+					if bgFullText != "" {
+						bgFullText += "\n\n" + event.Text
+					} else {
+						bgFullText = event.Text
+					}
 				}
 			case EventResult:
 				if !bgHasStreamDelta && bgFullText == "" {
@@ -752,7 +789,7 @@ func (c *Client) handleChatInput(userID string, text string) {
 			uid := currentUserID()
 			if uid != "" {
 				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
-					SessionID: c.claude.SessionID(),
+					SessionID: runner.SessionID(),
 				})
 				readyMsg.To = uid
 				c.send <- readyMsg
@@ -760,8 +797,8 @@ func (c *Client) handleChatInput(userID string, text string) {
 		}
 		case <-noOutputTimer.C:
 			// 30 min no events, Claude stuck, force kill
-			log.Printf("[TIMEOUT] No events for %v, killing Claude process", noOutputTimeout)
-			c.claude.Abort()
+			log.Printf("[TIMEOUT] No events for %v, killing engine process", noOutputTimeout)
+			runner.Abort()
 			gotError = true
 			lastErrorMsg = fmt.Sprintf("任务超时：超过 %v 无响应，已自动终止", noOutputTimeout)
 		}
@@ -801,7 +838,7 @@ streamEnded:
 			// 自动重置 bot session
 			if isContextWindowError(lastErrorMsg) {
 				log.Printf("[CTX] Context window full, auto-resetting bot session")
-				c.claude.SetBotSessionID("")
+				runner.SetBotSessionID("")
 			}
 		} else {
 			// Web UI：发送 chat_error + chat_ready 恢复前端交互
@@ -815,7 +852,7 @@ streamEnded:
 				c.send <- errMsg
 
 				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
-					SessionID: c.claude.SessionID(),
+					SessionID: runner.SessionID(),
 				})
 				readyMsg.To = uid
 				c.send <- readyMsg
@@ -823,7 +860,7 @@ streamEnded:
 			// 自动重置 Web UI session
 			if isContextWindowError(lastErrorMsg) {
 				log.Printf("[CTX] Context window full, auto-resetting session")
-				c.claude.ResetSession()
+				runner.ResetSession()
 				c.sessionMu.Lock()
 				c.sessionEvents = nil
 				c.sentUpTo = 0
@@ -1043,6 +1080,87 @@ func (c *Client) resendPendingResults() {
 	case <-time.After(10 * time.Second):
 		log.Printf("[BG] WARNING: Failed to resend pending result, will retry next reconnect")
 	}
+}
+
+// botEngineSafe 线程安全地读取 bot 通道当前引擎
+func (c *Client) botEngineSafe() string {
+	c.engineMu.Lock()
+	defer c.engineMu.Unlock()
+	return c.botEngine
+}
+
+// handleEngineCommand 处理 /engine 聊天命令（仅 bot 通道响应，Web UI 永远用 cc）
+// /engine            显示用法
+// /engine status     查看当前引擎
+// /engine claude     切换到 Claude Code（默认）
+// /engine codex      切换到 Codex CLI
+func (c *Client) handleEngineCommand(userID string, text string) {
+	if !strings.HasPrefix(userID, "bot-") {
+		c.sendChatError(userID, "/engine 命令仅在微信通道可用")
+		return
+	}
+
+	parts := strings.Fields(text)
+	subcmd := ""
+	if len(parts) >= 2 {
+		subcmd = parts[1]
+	}
+
+	var reply string
+	current := c.botEngineSafe()
+
+	switch subcmd {
+	case "status":
+		reply = fmt.Sprintf("当前引擎: %s", current)
+
+	case "":
+		reply = "用法:\n  /engine status   - 查看当前引擎\n  /engine claude   - 切换到 Claude Code\n  /engine codex    - 切换到 Codex CLI"
+
+	case "claude", "codex":
+		c.engineMu.Lock()
+		if c.botEngine == subcmd {
+			c.engineMu.Unlock()
+			reply = fmt.Sprintf("已经在使用 %s 引擎", subcmd)
+			break
+		}
+		// 切换前检查：当前引擎和目标引擎都不能在运行
+		var curRunner, target Runner
+		if c.botEngine == "codex" {
+			curRunner = c.codex
+		} else {
+			curRunner = c.claude
+		}
+		if subcmd == "codex" {
+			target = c.codex
+		} else {
+			target = c.claude
+		}
+		if curRunner.IsRunning() || target.IsRunning() {
+			c.engineMu.Unlock()
+			c.sendChatError(userID, "引擎正在处理任务，请等待完成后再切换")
+			return
+		}
+		// codex 需检查二进制是否存在
+		if subcmd == "codex" {
+			if _, err := exec.LookPath(c.codex.config.Path); err != nil {
+				c.engineMu.Unlock()
+				c.sendChatError(userID, "codex 未安装或不在 PATH 中")
+				return
+			}
+		}
+		// 执行切换 + 重置目标引擎 bot session（必须在 engineMu 内，消除
+		// "切引擎后第一条消息读到新 botEngine + 旧 thread_id → resume 到旧 thread"窗口）
+		c.botEngine = subcmd
+		target.SetBotSessionID("")
+		c.engineMu.Unlock()
+		reply = fmt.Sprintf("已切换到 %s 引擎，会话已重置", subcmd)
+
+	default:
+		reply = fmt.Sprintf("未知引擎: %s\n可用引擎: claude, codex", subcmd)
+	}
+
+	c.sendChatText(userID, reply)
+	c.sendChatReady(userID)
 }
 
 // handleProviderCommand 处理 /provider 聊天命令

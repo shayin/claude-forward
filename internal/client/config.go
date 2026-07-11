@@ -16,6 +16,7 @@ type Config struct {
 	Client ClientConfig `yaml:"client"`
 	Tmux   TmuxConfig   `yaml:"tmux"`
 	Claude ClaudeConfig `yaml:"claude"`
+	Codex  CodexConfig  `yaml:"codex"`
 	Path   string       // 工作目录（运行时推导，不来自配置文件）
 }
 
@@ -42,6 +43,15 @@ type TmuxConfig struct {
 	Shell       string `yaml:"shell"` // 默认 shell
 }
 
+// CodexConfig Codex CLI 引擎配置（微信通道通过 /engine codex 启用，Web UI 不使用）
+type CodexConfig struct {
+	Path     string `yaml:"path"`     // codex 二进制路径，默认 "codex"
+	Sandbox  string `yaml:"sandbox"`  // sandbox 模式: workspace-write | read-only | dangerously-bypass-approvals-and-sandbox
+	Model    string `yaml:"model"`    // 可选模型覆盖（留空用 codex 默认模型）
+	WorkDir  string `yaml:"work_dir"` // 可选工作目录（留空用 CWD，通常与 cc 一致）
+	ClientID string `yaml:"-"`        // 客户端标识（运行时注入，用于区分多客户端 session 文件）
+}
+
 // DefaultConfig 返回默认配置（ID/Name/SessionName 留空，由 ApplyDefaults 动态推导）
 func DefaultConfig() *Config {
 	return &Config{
@@ -51,6 +61,10 @@ func DefaultConfig() *Config {
 		},
 		Tmux: TmuxConfig{
 			AutoStart: true,
+		},
+		Codex: CodexConfig{
+			Path:    "codex",
+			Sandbox: "workspace-write",
 		},
 	}
 }

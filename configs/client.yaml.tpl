@@ -22,3 +22,13 @@ claude:
   env_file: ""                        # 可选，指向包含 export KEY=VALUE 的 shell 文件（用于 API 认证等）
                                       # 优先级高于 ~/.claude/settings.json 的 env 字段
   provider_dir: "~/.claude/providers" # 可选，providers 脚本目录，用于 /provider list 扫描和快速切换
+
+# Codex CLI 引擎配置（微信通道通过 /engine codex 切换启用，Web UI 不使用 codex）
+codex:
+  path: "codex"                    # codex 二进制路径，留空默认使用 PATH 中的 codex
+  sandbox: "workspace-write"       # sandbox 模式:
+                                    #   workspace-write（默认，工作区可写但联网阻断）
+                                    #   read-only（只读）
+                                    #   dangerously-bypass-approvals-and-sandbox（无限制含联网，仅在自己机器上用）
+  model: ""                        # 可选模型覆盖，留空用 codex 默认模型
+  work_dir: ""                     # 可选工作目录，留空用当前目录（通常与 cc 一致）
