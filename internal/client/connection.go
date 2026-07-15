@@ -445,6 +445,10 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 			go c.handleEngineCommand(msg.From, payload.Text)
 			return
 		}
+		if strings.HasPrefix(payload.Text, "/model") {
+			go c.handleModelCommand(msg.From, payload.Text)
+			return
+		}
 		// 记录当前微信用户 ID（来自 Server 下发），供断线自动后台时使用
 		if payload.WechatID != "" {
 			c.bgMu.Lock()
@@ -1157,6 +1161,52 @@ func (c *Client) handleEngineCommand(userID string, text string) {
 
 	default:
 		reply = fmt.Sprintf("未知引擎: %s\n可用引擎: claude, codex", subcmd)
+	}
+
+	c.sendChatText(userID, reply)
+	c.sendChatReady(userID)
+}
+
+// handleModelCommand 处理 /model 聊天命令（仅微信 + codex 引擎）
+// /model            显示用法
+// /model status     查看当前 codex 模型
+// /model <name>     切换 codex 模型（运行时改，下一条消息生效，无需重启）
+func (c *Client) handleModelCommand(userID string, text string) {
+	if !strings.HasPrefix(userID, "bot-") {
+		c.sendChatError(userID, "/model 命令仅在微信通道可用")
+		return
+	}
+	if c.botEngineSafe() != "codex" {
+		c.sendChatError(userID, "/model 仅在 codex 引擎下可用，请先 /engine codex")
+		return
+	}
+
+	parts := strings.Fields(text)
+	subcmd := ""
+	if len(parts) >= 2 {
+		subcmd = parts[1]
+	}
+
+	var reply string
+	switch subcmd {
+	case "status":
+		m := c.codex.GetModel()
+		if m == "" {
+			m = "(未指定，用 codex 默认)"
+		}
+		reply = fmt.Sprintf("当前 codex 模型: %s", m)
+
+	case "":
+		reply = "用法:\n  /model status   - 查看当前模型\n  /model <name>   - 切换模型（如 gpt-5-codex）"
+
+	default:
+		// 切换模型：codex 正在跑则拒绝；切换不重置 session（换模型不影响对话上下文）
+		if c.codex.IsRunning() {
+			c.sendChatError(userID, "codex 正在处理任务，请等待完成后再切换模型")
+			return
+		}
+		c.codex.SetModel(subcmd)
+		reply = fmt.Sprintf("已切换 codex 模型到 %s（下一条消息生效）", subcmd)
 	}
 
 	c.sendChatText(userID, reply)

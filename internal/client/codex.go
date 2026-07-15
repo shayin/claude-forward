@@ -21,6 +21,7 @@ type CodexManager struct {
 	config       CodexConfig
 	sessionID    string // Web UI 会话 ID（codex 实际不用于 Web UI，保留接口对称）
 	botSessionID string // Bot API（微信端）的 codex thread_id，独立持久化
+	model        string // 运行时可改的模型（初始从 config.Model 读），通过 /model 命令切换
 	cancel       context.CancelFunc
 	events       chan ClaudeEvent
 	mu           sync.Mutex
@@ -40,6 +41,7 @@ func NewCodexManager(config CodexConfig) *CodexManager {
 	}
 	cm := &CodexManager{
 		config:  config,
+		model:   config.Model, // 初始从配置读，运行时可通过 /model 命令切换
 		running: false,
 	}
 	cm.loadSessionID()
@@ -84,6 +86,20 @@ func (cm *CodexManager) IsRunning() bool {
 	return cm.running
 }
 
+// GetModel 返回当前 codex 模型（运行时可被 /model 命令修改）
+func (cm *CodexManager) GetModel() string {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.model
+}
+
+// SetModel 运行时切换 codex 模型（由 /model 命令调用）
+func (cm *CodexManager) SetModel(m string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.model = m
+}
+
 // SendMessage 发送消息给 Codex，启动一个 `codex exec` 子进程。
 // resumeSessionID 非空时用 `codex exec resume <id>` 续接该 thread，为空则全新会话。
 func (cm *CodexManager) SendMessage(text string, resumeSessionID string) error {
@@ -100,30 +116,23 @@ func (cm *CodexManager) SendMessage(text string, resumeSessionID string) error {
 	cm.running = true
 	cm.mu.Unlock()
 
-	// 构建命令参数
-	// 全新会话：codex exec --json --sandbox <mode> --ask-for-approval never "<text>"
-	// resume：codex exec resume --json <thread_id> "<text>"（sandbox 由原 thread 继承）
-	// TODO(codex-untested): resume 子命令的 flag 顺序、--skip-git-repo-check 是否被 resume
-	// 接受，均未在真实 codex CLI 实测（开发机跑不了 codex）。若 codex 拒绝当前参数，
-	// 进程会立即退出，sentAny 兜底会反馈错误。需在 codex 环境一次性验证。
-	args := []string{"exec"}
-	if resumeSessionID != "" {
-		args = append(args, "resume")
-	}
-	args = append(args, "--json", "--color", "never", "--skip-git-repo-check")
+	// 构建命令参数（全局 flag 必须在 resume 子命令之前——codex 0.144.x 实测要求）
+	// 全新会话：codex exec --json --sandbox <mode> "<text>"
+	// resume：   codex exec --json resume <thread_id> "<text>"（sandbox 由原 thread 继承）
+	args := []string{"exec", "--json", "--color", "never", "--skip-git-repo-check"}
 	if resumeSessionID == "" {
 		// 全新会话才指定 sandbox；resume 继承原 thread 的设置
 		if cm.config.Sandbox == "dangerously-bypass-approvals-and-sandbox" {
 			args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 		} else {
-			args = append(args, "--sandbox", cm.config.Sandbox, "--ask-for-approval", "never")
+			args = append(args, "--sandbox", cm.config.Sandbox)
 		}
 	}
-	if cm.config.Model != "" {
-		args = append(args, "-m", cm.config.Model)
+	if model := cm.GetModel(); model != "" {
+		args = append(args, "-m", model)
 	}
 	if resumeSessionID != "" {
-		args = append(args, resumeSessionID)
+		args = append(args, "resume", resumeSessionID)
 	}
 	args = append(args, text)
 

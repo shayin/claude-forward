@@ -30,5 +30,5 @@ codex:
                                     #   workspace-write（默认，工作区可写但联网阻断）
                                     #   read-only（只读）
                                     #   dangerously-bypass-approvals-and-sandbox（无限制含联网，仅在自己机器上用）
-  model: ""                        # 可选模型覆盖，留空用 codex 默认模型
+  model: ""                        # 默认模型，留空用 codex 内置默认；微信可用 /model 运行时切换
   work_dir: ""                     # 可选工作目录，留空用当前目录（通常与 cc 一致）

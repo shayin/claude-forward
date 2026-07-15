@@ -282,8 +282,8 @@ func (m *WeChatManager) handleMessage(idx string, user *wechatUserState, msg ILi
 		}
 	}
 
-	// 处理指令（/provider、/engine 透传给 client，由 client 端处理）
-	if strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "/provider") && !strings.HasPrefix(text, "/engine") {
+	// 处理指令（/provider、/engine、/model 透传给 client，由 client 端处理）
+	if strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "/provider") && !strings.HasPrefix(text, "/engine") && !strings.HasPrefix(text, "/model") {
 		m.handleCommand(idx, user, fromUser, text, sendReply)
 		return
 	}
