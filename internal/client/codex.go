@@ -5,13 +5,39 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
+
+// openEngineStdoutLog 打开引擎 stdout 留存日志（诊断用）。
+// 路径 ~/.claude-forward/logs/<engine>-<clientID>-YYYY-MM-DD.jsonl，按 clientID + 日期分文件。
+// 失败返回 nil（不影响主流程，只是没有留存）。
+func openEngineStdoutLog(engine, clientID string) *os.File {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	logDir := filepath.Join(dir, ".claude-forward", "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil
+	}
+	date := time.Now().Format("2006-01-02")
+	name := fmt.Sprintf("%s-%s-%s.jsonl", engine, clientID, date)
+	if clientID == "" {
+		name = fmt.Sprintf("%s-%s.jsonl", engine, date)
+	}
+	f, err := os.OpenFile(filepath.Join(logDir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil
+	}
+	return f
+}
 
 // CodexManager 管理 Codex CLI（codex exec）调用，实现 Runner interface。
 // 与 ClaudeManager 镜像相同的事件模型（ClaudeEvent），供 handleChatInput 在
@@ -166,6 +192,9 @@ func (cm *CodexManager) SendMessage(text string, resumeSessionID string) error {
 
 	log.Printf("Codex process started: pid=%d args=%v", cmd.Process.Pid, args)
 
+	// stdout 留存日志（诊断用）：~/.claude-forward/logs/codex-<clientID>-YYYY-MM-DD.jsonl
+	stdoutLog := openEngineStdoutLog("codex", cm.config.ClientID)
+
 	// resume 时记下期望的 thread_id，用于 thread.started 校验（codex 对非法 id 会静默新建 thread）
 	expectedThread := resumeSessionID
 
@@ -177,11 +206,19 @@ func (cm *CodexManager) SendMessage(text string, resumeSessionID string) error {
 			if logFile != nil {
 				logFile.Close()
 			}
+			if stdoutLog != nil {
+				stdoutLog.Close()
+			}
 		}()
 
 		parser := &codexParser{expectedThread: expectedThread}
 
-		scanner := bufio.NewScanner(stdout)
+		// stdout 经 TeeReader 同时写入留存日志（便于事后排查"未返回文本"等问题）
+		reader := io.Reader(stdout)
+		if stdoutLog != nil {
+			reader = io.TeeReader(stdout, stdoutLog)
+		}
+		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 		sentAny := false // 跟踪是否发出过事件，用于进程异常退出时补错误反馈

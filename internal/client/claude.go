@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -212,6 +213,9 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 
 	log.Printf("Claude process started: pid=%d args=%v", cmd.Process.Pid, args)
 
+	// stdout 留存日志（诊断用）：~/.claude-forward/logs/claude-<clientID>-YYYY-MM-DD.jsonl
+	stdoutLog := openEngineStdoutLog("claude", cm.config.ClientID)
+
 	// 启动 JSONL 读取协程
 	go func() {
 		defer func() {
@@ -221,9 +225,17 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 			if logFile != nil {
 				logFile.Close()
 			}
+			if stdoutLog != nil {
+				stdoutLog.Close()
+			}
 		}()
 
-		scanner := bufio.NewScanner(stdout)
+		// stdout 经 TeeReader 同时写入留存日志（便于事后排查"未返回文本"等问题）
+		reader := io.Reader(stdout)
+		if stdoutLog != nil {
+			reader = io.TeeReader(stdout, stdoutLog)
+		}
+		scanner := bufio.NewScanner(reader)
 		// 增大 buffer，Claude 的输出行可能很长
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
