@@ -52,6 +52,21 @@ type Client struct {
 	bgTaskID       string // 后台任务 ID
 	bgWechatID     string // 完成后推送给谁
 	currentWechatID string // 当前正在处理的微信用户 ID（来自 ChatInputPayload.WechatID）
+
+	// P1-b: 任务进行中时排队的消息（存完整上下文防 WechatID 串扰），当前任务完成后递归处理
+	pendingMu   sync.Mutex
+	pendingMsgs []pendingMsg
+
+	// P1-c: 重连后延迟重放的旧后台结果（新结果送达后再推，加 ⏮ 前缀，避免顺序错乱）
+	bgResendMu    sync.Mutex
+	bgResendQueue []protocol.BackgroundResultPayload
+}
+
+// pendingMsg 排队的微信消息（任务进行中时存，含完整上下文防 WechatID 串扰）
+type pendingMsg struct {
+	Text     string
+	WechatID string
+	From     string
 }
 
 // NewClient 创建客户端
@@ -464,7 +479,7 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.sessionEvents = append(c.sessionEvents, *userMsg)
 		c.saveSessionEvents()
 		c.sessionMu.Unlock()
-		go c.handleChatInput(msg.From, payload.Text)
+		go c.handleChatInput(msg.From, payload.Text, 0)
 
 	case protocol.TypeNewSession:
 		if strings.HasPrefix(msg.From, "bot-") {
@@ -590,7 +605,7 @@ func (c *Client) stopForwarding() {
 }
 
 // handleChatInput 处理聊天输入，启动 Claude 并流式转发结果
-func (c *Client) handleChatInput(userID string, text string) {
+func (c *Client) handleChatInput(userID string, text string, depth int) {
 	// 动态获取当前连接的用户 ID（支持断线重连后切换）
 	currentUserID := func() string {
 		c.userMu.RLock()
@@ -622,12 +637,24 @@ func (c *Client) handleChatInput(userID string, text string) {
 
 	if runner.IsRunning() {
 		c.engineMu.Unlock()
-		errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
-			Code:    409,
-			Message: "engine is still processing, please wait",
-		})
-		errMsg.To = currentUserID()
-		c.send <- errMsg
+		// P1-b: 任务进行中，存入 pending 队列（存完整上下文防 WechatID 串扰），当前任务完成后递归处理
+		c.bgMu.Lock()
+		wechatID := c.currentWechatID
+		c.bgMu.Unlock()
+		c.pendingMu.Lock()
+		if len(c.pendingMsgs) < 8 {
+			c.pendingMsgs = append(c.pendingMsgs, pendingMsg{Text: text, WechatID: wechatID, From: userID})
+			c.pendingMu.Unlock()
+			log.Printf("[BG] Task running, queued pending msg (depth=%d, queueLen=%d)", depth, len(c.pendingMsgs))
+		} else {
+			c.pendingMu.Unlock()
+			errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
+				Code:    409,
+				Message: "排队消息过多，请稍后再试",
+			})
+			errMsg.To = currentUserID()
+			c.send <- errMsg
+		}
 		return
 	}
 
@@ -826,10 +853,11 @@ streamEnded:
 						pushText = "上下文已满，已自动新建会话，请重新发送你的消息。"
 					}
 					resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, protocol.BackgroundResultPayload{
-						TaskID:   fmt.Sprintf("error-%d", time.Now().UnixMilli()),
-						WechatID: wechatID,
-						IsError:  true,
-						ErrorMsg: pushText,
+						TaskID:    fmt.Sprintf("error-%d", time.Now().UnixMilli()),
+						WechatID:  wechatID,
+						IsError:   true,
+						ErrorMsg:  pushText,
+						CreatedAt: time.Now().UnixMilli(),
 					})
 					select {
 					case c.send <- resultMsg:
@@ -901,28 +929,49 @@ streamEnded:
 
 	if bgActive {
 		log.Printf("[BG] Background task completed: taskID=%s textLen=%d", bgTask, len(bgFullText))
-		resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, protocol.BackgroundResultPayload{
-			TaskID:   bgTask,
-			WechatID: bgWechat,
-			FullText: bgFullText,
-			IsError:  bgIsError,
-			ErrorMsg: bgErrorMsg,
-			CostUSD:  bgCostUSD,
-		})
-		select {
-		case c.send <- resultMsg:
-			log.Printf("[BG] BackgroundResult sent successfully")
-		case <-time.After(30 * time.Second):
-			log.Printf("[BG] WARNING: Failed to send BackgroundResult, persisting to disk")
-			c.savePendingResult(protocol.BackgroundResultPayload{
-				TaskID:   bgTask,
-				WechatID: bgWechat,
-				FullText: bgFullText,
-				IsError:  bgIsError,
-				ErrorMsg: bgErrorMsg,
-				CostUSD:  bgCostUSD,
-			})
+		payload := protocol.BackgroundResultPayload{
+			TaskID:    bgTask,
+			WechatID:  bgWechat,
+			FullText:  bgFullText,
+			IsError:   bgIsError,
+			ErrorMsg:  bgErrorMsg,
+			CostUSD:   bgCostUSD,
+			CreatedAt: time.Now().UnixMilli(),
 		}
+		// P0-a: 任务生命周期内断过线（connGen 变化）→ 旧 writePump 已失效，c.send 不可靠 → 直接落盘
+		// 重连后只走 resendPendingResults 单一路径，避免堆积消息重连后一次性 flush 洪泛
+		if atomic.LoadInt64(&c.connGen) != startGen {
+			log.Printf("[BG] connGen changed during task (start=%d now=%d), persisting to disk", startGen, atomic.LoadInt64(&c.connGen))
+			c.savePendingResult(payload)
+		} else {
+			resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
+			select {
+			case c.send <- resultMsg:
+				log.Printf("[BG] BackgroundResult sent successfully")
+				c.flushBgResendQueue() // P1-c: 新结果送达后，推送积压的旧结果（⏮ 前缀）
+			case <-time.After(30 * time.Second):
+				log.Printf("[BG] WARNING: Failed to send BackgroundResult, persisting to disk")
+				c.savePendingResult(payload)
+			}
+		}
+	}
+
+	// P1-b: 当前任务完成，处理 pending 队列（递归，上限 5 层，恢复 WechatID 防串扰）
+	if depth < 5 {
+		c.pendingMu.Lock()
+		if len(c.pendingMsgs) > 0 {
+			next := c.pendingMsgs[0]
+			c.pendingMsgs = c.pendingMsgs[1:]
+			remaining := len(c.pendingMsgs)
+			c.pendingMu.Unlock()
+			c.bgMu.Lock()
+			c.currentWechatID = next.WechatID // 恢复 WechatID，防 d2 质询指出的串扰
+			c.bgMu.Unlock()
+			log.Printf("[BG] Processing pending msg (depth=%d, remaining=%d)", depth+1, remaining)
+			c.handleChatInput(next.From, next.Text, depth+1)
+			return
+		}
+		c.pendingMu.Unlock()
 	}
 }
 
@@ -1027,8 +1076,8 @@ func isContextWindowError(msg string) bool {
 		strings.Contains(lower, "input is too long")
 }
 
-// pendingResultsPath 返回待重发的后台结果文件路径
-func (c *Client) pendingResultsPath() string {
+// pendingResultsDir 返回待重发后台结果的目录（按 taskID 分文件，避免多条互相覆盖）
+func (c *Client) pendingResultsDir() string {
 	dir, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -1037,52 +1086,102 @@ func (c *Client) pendingResultsPath() string {
 	if clientID == "" {
 		clientID = "default"
 	}
-	return filepath.Join(dir, ".claude-forward", "pending_results", clientID+".json")
+	return filepath.Join(dir, ".claude-forward", "pending_results", clientID)
 }
 
-// savePendingResult 持久化未发送的后台结果到磁盘
+// savePendingResult 持久化未发送的后台结果到磁盘（按 taskID 分文件）
 func (c *Client) savePendingResult(payload protocol.BackgroundResultPayload) {
-	path := c.pendingResultsPath()
-	if path == "" {
+	if payload.TaskID == "" {
 		return
 	}
-	os.MkdirAll(filepath.Dir(path), 0755)
+	dir := c.pendingResultsDir()
+	if dir == "" {
+		return
+	}
+	os.MkdirAll(dir, 0755)
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("[BG] Failed to marshal pending result: %v", err)
 		return
 	}
+	path := filepath.Join(dir, payload.TaskID+".json")
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		log.Printf("[BG] Failed to save pending result: %v", err)
 	} else {
-		log.Printf("[BG] Pending result saved to %s", path)
+		log.Printf("[BG] Pending result saved: taskID=%s", payload.TaskID)
 	}
 }
 
-// resendPendingResults 重发未发送的后台结果
+// resendPendingResults 读盘 → 存内存延迟重放队列 → 立即删盘
+// P1-c: 延迟到新结果送达后再推（加 ⏮ 前缀），避免重连后旧结果先于新结果到达造成顺序错乱
 func (c *Client) resendPendingResults() {
-	path := c.pendingResultsPath()
-	if path == "" {
+	dir := c.pendingResultsDir()
+	if dir == "" {
 		return
 	}
-	data, err := os.ReadFile(path)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return // 没有残留文件
+		return // 目录不存在
 	}
-	var payload protocol.BackgroundResultPayload
-	if err := json.Unmarshal(data, &payload); err != nil {
-		log.Printf("[BG] Failed to parse pending result: %v", err)
-		os.Remove(path)
-		return
+	c.bgResendMu.Lock()
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var payload protocol.BackgroundResultPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			log.Printf("[BG] Failed to parse pending result %s: %v", path, err)
+			os.Remove(path)
+			continue
+		}
+		// taskID 去重（防多次 Connect 累积重复）
+		dup := false
+		for _, p := range c.bgResendQueue {
+			if p.TaskID == payload.TaskID {
+				dup = true
+				break
+			}
+		}
+		os.Remove(path) // mark 时立即删盘，杜绝多次 Connect 重复
+		if !dup {
+			payload.IsResend = true
+			c.bgResendQueue = append(c.bgResendQueue, payload)
+			log.Printf("[BG] Pending result marked for delayed replay: taskID=%s", payload.TaskID)
+		}
 	}
-	log.Printf("[BG] Resending pending result: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
-	resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
-	select {
-	case c.send <- resultMsg:
-		os.Remove(path)
-		log.Printf("[BG] Pending result resent successfully")
-	case <-time.After(10 * time.Second):
-		log.Printf("[BG] WARNING: Failed to resend pending result, will retry next reconnect")
+	queueLen := len(c.bgResendQueue)
+	c.bgResendMu.Unlock()
+	// 超时兜底：若重连后 3 分钟内无新结果送达，也 flush（避免用户不发消息时旧结果永久卡住）
+	if queueLen > 0 {
+		time.AfterFunc(3*time.Minute, c.flushBgResendQueue)
+	}
+}
+
+// flushBgResendQueue 推送积压的旧后台结果（加 ⏮ 前缀），由新结果送达或超时触发
+func (c *Client) flushBgResendQueue() {
+	c.bgResendMu.Lock()
+	queue := c.bgResendQueue
+	c.bgResendQueue = nil
+	c.bgResendMu.Unlock()
+	for _, payload := range queue {
+		if payload.FullText != "" {
+			payload.FullText = "⏮ [断线前任务结果] " + payload.FullText
+		} else if payload.IsError && payload.ErrorMsg != "" {
+			payload.ErrorMsg = "[断线前任务错误] " + payload.ErrorMsg
+		}
+		msg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
+		select {
+		case c.send <- msg:
+			log.Printf("[BG] Flushed delayed replay: taskID=%s", payload.TaskID)
+		case <-time.After(5 * time.Second):
+			log.Printf("[BG] WARNING: flushBgResendQueue timeout, taskID=%s", payload.TaskID)
+			return
+		}
 	}
 }
 

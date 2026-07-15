@@ -193,6 +193,8 @@ type BackgroundResultPayload struct {
 	IsError   bool    `json:"is_error"`
 	ErrorMsg  string  `json:"error_msg,omitempty"`
 	CostUSD   float64 `json:"cost_usd,omitempty"`
+	CreatedAt int64   `json:"created_at,omitempty"` // 生成时间(UnixMilli)，server 据此做时效校验
+	IsResend  bool    `json:"is_resend,omitempty"`  // 是否为重连后重发（豁免时效校验，仍做去重）
 }
 
 // NewMessage 创建新消息

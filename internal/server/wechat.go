@@ -35,6 +35,9 @@ type wechatUserState struct {
 	// Push 离线队列
 	PushQueue []pushQueueItem
 
+	// P1-a: 消息串行队列（保证同一用户消息按发送序处理，避免并发抢写导致顺序错乱/丢失）
+	MsgQueue chan ILinkIncomingMessage
+
 	// 控制
 	stopCh  chan struct{}
 	stopped bool
@@ -64,6 +67,7 @@ func NewWeChatManager(hub *Hub, auth *Auth, cfg WeChatConfig) *WeChatManager {
 			Bot:           NewILinkBot(),
 			Bindings:      make(map[string]string),
 			TypingTickets: make(map[string]string),
+			MsgQueue:      make(chan ILinkIncomingMessage, 64),
 			stopCh:        make(chan struct{}),
 		}
 	}
@@ -79,6 +83,14 @@ func NewWeChatManager(hub *Hub, auth *Auth, cfg WeChatConfig) *WeChatManager {
 
 // Start 启动所有微信用户会话
 func (m *WeChatManager) Start() {
+	// P1-a: 为每个用户启动串行消息处理 goroutine（永久运行，stopCh 退出）
+	for idx, user := range m.users {
+		go m.processLoop(idx, user)
+	}
+	// P2: 恢复 UpdateBuf（避免服务端重启后游标归零导致 iLink 重投递断线期间消息）
+	for idx, user := range m.users {
+		m.loadBuf(idx, user)
+	}
 	for idx, user := range m.users {
 		// 加载离线队列
 		m.loadPushQueue(idx, user)
@@ -123,6 +135,7 @@ func (m *WeChatManager) Stop() {
 		if !user.stopped && user.LoginResult != nil {
 			close(user.stopCh)
 			user.stopped = true
+			m.saveBuf(idx, user) // P2: 落盘 UpdateBuf，重启后游标不归零
 			log.Printf("[WECHAT] 停止用户 %s (%s)", idx, user.Route.WechatID)
 		}
 	}
@@ -256,7 +269,27 @@ func (m *WeChatManager) pollLoop(idx string, user *wechatUserState) {
 		user.Bot.UpdateBuf = newBuf
 
 		for _, msg := range msgs {
-			go m.handleMessage(idx, user, msg)
+			// P1-a: 投递串行队列（processLoop 按序处理），非阻塞写，满则丢弃+日志
+			select {
+			case user.MsgQueue <- msg:
+			default:
+				log.Printf("[WECHAT] msgQueue full (user=%s), dropping message from %s", idx, msg.FromUserID)
+			}
+		}
+	}
+}
+
+// processLoop 串行处理用户的微信消息（P1-a：保证顺序，避免 pollLoop 并发 go handleMessage 导致乱序/409 丢失）
+func (m *WeChatManager) processLoop(idx string, user *wechatUserState) {
+	for {
+		select {
+		case msg, ok := <-user.MsgQueue:
+			if !ok {
+				return
+			}
+			m.handleMessage(idx, user, msg)
+		case <-user.stopCh:
+			return
 		}
 	}
 }
@@ -1084,6 +1117,27 @@ func (m *WeChatManager) loadPushQueue(idx string, user *wechatUserState) {
 	user.PushQueue = queue
 	if len(queue) > 0 {
 		log.Printf("[WECHAT] 恢复 %d 条待推送消息 (%s)", len(queue), idx)
+	}
+}
+
+// saveBuf 持久化 UpdateBuf（P2：服务端正常重启时落盘，重启后游标不归零，避免 iLink 重投递断线期间消息）
+func (m *WeChatManager) saveBuf(idx string, user *wechatUserState) {
+	dir := m.userDir(idx)
+	os.MkdirAll(dir, 0755)
+	if err := os.WriteFile(filepath.Join(dir, "update_buf.txt"), []byte(user.Bot.UpdateBuf), 0600); err != nil {
+		log.Printf("[WECHAT] 保存 update_buf 失败: %v", err)
+	}
+}
+
+// loadBuf 恢复 UpdateBuf
+func (m *WeChatManager) loadBuf(idx string, user *wechatUserState) {
+	data, err := os.ReadFile(filepath.Join(m.userDir(idx), "update_buf.txt"))
+	if err != nil {
+		return
+	}
+	user.Bot.UpdateBuf = string(data)
+	if len(data) > 0 {
+		log.Printf("[WECHAT] 恢复 update_buf (%s): %d 字节", idx, len(data))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +27,8 @@ type Handler struct {
 	auth          *Auth
 	encryptionKey []byte          // 应用层加密密钥（nil 表示不加密）
 	wechatMgr     *WeChatManager // 微信管理器（可选，用于后台任务推送）
+	bgPushedMu    sync.Mutex
+	bgPushed      map[string]int64 // taskID → 推送时间(UnixMilli)，LRU 去重防断线堆积重连洪泛
 }
 
 // NewHandler 创建处理器
@@ -34,6 +37,7 @@ func NewHandler(hub *Hub, auth *Auth, encryptionKey []byte) *Handler {
 		hub:           hub,
 		auth:          auth,
 		encryptionKey: encryptionKey,
+		bgPushed:      make(map[string]int64),
 	}
 }
 
@@ -408,6 +412,29 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 		log.Printf("[BG] No WeChatManager, cannot push result")
 		return
 	}
+
+	// P0-b: 时效 + 去重闸门（防断线堆积的 BackgroundResult 重连后洪泛）
+	now := time.Now().UnixMilli()
+	const bgResultTTL = 5 * 60 * 1000 // 5 分钟
+	if !payload.IsResend && payload.CreatedAt > 0 && now-payload.CreatedAt > bgResultTTL {
+		log.Printf("[BG] Rejected stale background result: taskID=%s age=%dms (>5min)", payload.TaskID, now-payload.CreatedAt)
+		return
+	}
+	h.bgPushedMu.Lock()
+	if _, ok := h.bgPushed[payload.TaskID]; ok {
+		h.bgPushedMu.Unlock()
+		log.Printf("[BG] Rejected duplicate background result: taskID=%s", payload.TaskID)
+		return
+	}
+	h.bgPushed[payload.TaskID] = now
+	if len(h.bgPushed) > 500 { // 容量清理：超过 500 清理 >10min 的
+		for tid, t := range h.bgPushed {
+			if now-t > 10*60*1000 {
+				delete(h.bgPushed, tid)
+			}
+		}
+	}
+	h.bgPushedMu.Unlock()
 
 	// 推送结果到微信用户
 	text := payload.FullText
