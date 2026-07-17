@@ -49,6 +49,9 @@ certs/
 # Claude Code config
 .claude/
 
+# Local review and investigation notes
+docs/
+
 # WeChat bridge (external)
 wechat-bridge
 
