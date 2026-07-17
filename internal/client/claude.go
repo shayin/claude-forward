@@ -31,15 +31,15 @@ const (
 
 // ClaudeEvent Claude 输出事件
 type ClaudeEvent struct {
-	Type       ClaudeEventType   `json:"type"`
-	SessionID  string            `json:"session_id,omitempty"`
-	Text       string            `json:"text,omitempty"`
-	ToolID     string            `json:"tool_id,omitempty"`
-	ToolName   string            `json:"tool_name,omitempty"`
-	ToolInput  json.RawMessage   `json:"tool_input,omitempty"`
-	ToolOutput string            `json:"tool_output,omitempty"`
-	CostUSD    float64           `json:"cost_usd,omitempty"`
-	IsPartial  bool              `json:"is_partial,omitempty"`
+	Type       ClaudeEventType `json:"type"`
+	SessionID  string          `json:"session_id,omitempty"`
+	Text       string          `json:"text,omitempty"`
+	ToolID     string          `json:"tool_id,omitempty"`
+	ToolName   string          `json:"tool_name,omitempty"`
+	ToolInput  json.RawMessage `json:"tool_input,omitempty"`
+	ToolOutput string          `json:"tool_output,omitempty"`
+	CostUSD    float64         `json:"cost_usd,omitempty"`
+	IsPartial  bool            `json:"is_partial,omitempty"`
 	// Token 用量（来自 result 事件）
 	InputTokens              int `json:"input_tokens,omitempty"`
 	OutputTokens             int `json:"output_tokens,omitempty"`
@@ -273,7 +273,7 @@ func (cm *ClaudeManager) SendMessage(text string, resumeSessionID string) error 
 
 // Stream 返回事件 channel。
 // 约束：必须在 SendMessage 返回成功后调用，且调用方保证无并发 SendMessage
-//（cm.events 在 SendMessage 内创建、goroutine 内 close，依赖 happens-before 时序）。
+// （cm.events 在 SendMessage 内创建、goroutine 内 close，依赖 happens-before 时序）。
 func (cm *ClaudeManager) Stream() <-chan ClaudeEvent {
 	return cm.events
 }
@@ -421,8 +421,8 @@ func parseJSONLLine(line string) []ClaudeEvent {
 	case "system":
 		// system 消息，可能包含 session init
 		var msg struct {
-			Type    string `json:"type"`
-			Subtype string `json:"subtype"`
+			Type      string `json:"type"`
+			Subtype   string `json:"subtype"`
 			SessionID string `json:"session_id"`
 		}
 		if err := json.Unmarshal([]byte(line), &msg); err == nil {
@@ -442,6 +442,8 @@ func parseJSONLLine(line string) []ClaudeEvent {
 		// 最终结果
 		var msg struct {
 			Type      string  `json:"type"`
+			Subtype   string  `json:"subtype"`
+			IsError   bool    `json:"is_error"`
 			Result    string  `json:"result"`
 			SessionID string  `json:"session_id"`
 			CostUSD   float64 `json:"total_cost_usd"`
@@ -456,15 +458,23 @@ func parseJSONLLine(line string) []ClaudeEvent {
 			} `json:"modelUsage"`
 		}
 		if err := json.Unmarshal([]byte(line), &msg); err == nil {
+			if msg.IsError || (msg.Subtype != "" && msg.Subtype != "success") {
+				errText := msg.Result
+				if errText == "" {
+					errText = fmt.Sprintf("Claude 执行未完成（%s）", msg.Subtype)
+				}
+				events = append(events, ClaudeEvent{Type: EventError, Text: errText, SessionID: msg.SessionID})
+				break
+			}
 			evt := ClaudeEvent{
-				Type:                    EventResult,
-				Text:                    msg.Result,
-				SessionID:               msg.SessionID,
-				CostUSD:                 msg.CostUSD,
-				InputTokens:             msg.Usage.InputTokens,
-				OutputTokens:            msg.Usage.OutputTokens,
+				Type:                     EventResult,
+				Text:                     msg.Result,
+				SessionID:                msg.SessionID,
+				CostUSD:                  msg.CostUSD,
+				InputTokens:              msg.Usage.InputTokens,
+				OutputTokens:             msg.Usage.OutputTokens,
 				CacheCreationInputTokens: msg.Usage.CacheCreationInputTokens,
-				CacheReadInputTokens:    msg.Usage.CacheReadInputTokens,
+				CacheReadInputTokens:     msg.Usage.CacheReadInputTokens,
 			}
 			// 从 modelUsage 提取 contextWindow
 			for _, m := range msg.ModelUsage {
@@ -564,9 +574,9 @@ func parseStreamEvent(line, typeStr string) []ClaudeEvent {
 	// content_block_start - 可能是 tool_use 开始
 	if typeStr == "content_block_start" {
 		var msg struct {
-			Type          string `json:"type"`
-			Index         int    `json:"index"`
-			ContentBlock  struct {
+			Type         string `json:"type"`
+			Index        int    `json:"index"`
+			ContentBlock struct {
 				Type  string          `json:"type"`
 				ID    string          `json:"id,omitempty"`
 				Name  string          `json:"name,omitempty"`

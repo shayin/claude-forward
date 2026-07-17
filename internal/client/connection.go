@@ -28,7 +28,7 @@ type Client struct {
 	codex         *CodexManager // codex CLI 引擎（bot 通道可选）
 	botEngine     string        // bot 通道当前引擎："claude"（默认）| "codex"
 	hookServer    *HookServer   // 权限 Hook 服务器
-	attachedUser  string      // 当前连接的用户 ID
+	attachedUser  string        // 当前连接的用户 ID
 	userMu        sync.RWMutex
 	mu            sync.Mutex
 	engineMu      sync.Mutex // 保护 botEngine 读写 + 引擎启动/切换临界区（消除 TOCTOU）
@@ -42,15 +42,15 @@ type Client struct {
 	// 会话级别事件缓冲：存储当前 Claude 会话的所有事件
 	// 在 handleChatInput goroutine 退出后仍保留，支持断线重连后完整回放
 	sessionEvents []protocol.Message
-	sentUpTo      int         // 已发送到用户的事件索引（用于去重）
-	sessionMu     sync.Mutex  // 保护 sessionEvents 和 sentUpTo
+	sentUpTo      int        // 已发送到用户的事件索引（用于去重）
+	sessionMu     sync.Mutex // 保护 sessionEvents 和 sentUpTo
 
 	// 后台模式：超时后任务转为后台继续运行
 	// 受 bgMu 保护：handleMessage 写入，handleChatInput 读取/清零
-	bgMu       sync.Mutex
-	bgMode         bool   // 当前是否处于后台模式
-	bgTaskID       string // 后台任务 ID
-	bgWechatID     string // 完成后推送给谁
+	bgMu            sync.Mutex
+	bgMode          bool   // 当前是否处于后台模式
+	bgTaskID        string // 后台任务 ID
+	bgWechatID      string // 完成后推送给谁
 	currentWechatID string // 当前正在处理的微信用户 ID（来自 ChatInputPayload.WechatID）
 
 	// P1-b: 任务进行中时排队的消息（存完整上下文防 WechatID 串扰），当前任务完成后递归处理
@@ -67,6 +67,42 @@ type pendingMsg struct {
 	Text     string
 	WechatID string
 	From     string
+}
+
+// backgroundTextCollector 收集后台任务的文本。
+// Claude 在一次任务中可能先输出多段执行进度，最后才在 result 事件中给出完整答案。
+// 因此非空 result 必须优先于过程文本；Codex 的 result 没有文本时则回退到 agent_message。
+type backgroundTextCollector struct {
+	fallbackText   string
+	hasStreamDelta bool
+	finalResult    string
+}
+
+func (c *backgroundTextCollector) add(event ClaudeEvent) {
+	switch event.Type {
+	case EventStreamDelta:
+		c.hasStreamDelta = true
+		c.fallbackText += event.Text
+	case EventText:
+		if c.hasStreamDelta {
+			return
+		}
+		if c.fallbackText != "" {
+			c.fallbackText += "\n\n"
+		}
+		c.fallbackText += event.Text
+	case EventResult:
+		if strings.TrimSpace(event.Text) != "" {
+			c.finalResult = event.Text
+		}
+	}
+}
+
+func (c *backgroundTextCollector) text() string {
+	if c.finalResult != "" {
+		return c.finalResult
+	}
+	return c.fallbackText
 }
 
 // NewClient 创建客户端
@@ -684,8 +720,7 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 		c.bgMu.Unlock()
 	}
 
-	var bgFullText string
-	var bgHasStreamDelta bool
+	var bgText backgroundTextCollector
 	var bgCostUSD float64
 	var bgIsError bool
 	var bgErrorMsg string
@@ -715,117 +750,102 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 				goto streamEnded
 			}
 			noOutputTimer.Reset(noOutputTimeout)
-		// 从事件中捕获 session_id，分别持久化
-		if event.SessionID != "" {
-			if isBot {
-				runner.SetBotSessionID(event.SessionID)
-			} else {
-				runner.SetSessionID(event.SessionID)
-			}
-		}
-
-		msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
-			EventType:                string(event.Type),
-			Text:                     event.Text,
-			ToolID:                   event.ToolID,
-			ToolName:                 event.ToolName,
-			ToolInput:                event.ToolInput,
-			ToolOutput:               event.ToolOutput,
-			CostUSD:                  event.CostUSD,
-			IsPartial:                event.IsPartial,
-			SessionID:                event.SessionID,
-			InputTokens:              event.InputTokens,
-			OutputTokens:             event.OutputTokens,
-			CacheCreationInputTokens: event.CacheCreationInputTokens,
-			CacheReadInputTokens:     event.CacheReadInputTokens,
-			ContextWindow:            event.ContextWindow,
-		})
-
-		uid := currentUserID()
-
-		if isBot {
-			// Bot API：直接发送，不存 sessionEvents
-			// 后台模式下跳过发送（无人接收，避免 c.send 阻塞）
-			if uid != "" && !bgActive {
-				msg.To = uid
-				c.send <- msg
-			}
-			// 后台模式：收集文本用于异步推送
-			switch event.Type {
-			case EventStreamDelta:
-				bgHasStreamDelta = true
-				bgFullText += event.Text
-			case EventText:
-				// codex 一轮可能产出多个 agent_message（EventText），累加以免覆盖
-				// cc 通常单个 EventText，bgFullText 为空时走 else 分支，行为不变
-				if !bgHasStreamDelta {
-					if bgFullText != "" {
-						bgFullText += "\n\n" + event.Text
-					} else {
-						bgFullText = event.Text
-					}
+			// 从事件中捕获 session_id，分别持久化
+			if event.SessionID != "" {
+				if isBot {
+					runner.SetBotSessionID(event.SessionID)
+				} else {
+					runner.SetSessionID(event.SessionID)
 				}
-			case EventResult:
-				if !bgHasStreamDelta && bgFullText == "" {
-					bgFullText = event.Text
-				}
-				bgCostUSD = event.CostUSD
-				gotResult = true
-			case EventError:
-				bgIsError = true
-				bgErrorMsg = event.Text
-				gotError = true
-				lastErrorMsg = event.Text
 			}
-			bgEventCount++
 
-			// 检测连接代数变化（服务器重启/断线重连），自动切换后台模式
-			c.bgMu.Lock()
-			bgActive = c.bgMode
-			if !bgActive && atomic.LoadInt64(&c.connGen) != startGen {
-				c.bgMode = true
-				c.bgTaskID = fmt.Sprintf("auto-bg-%d", time.Now().UnixMilli())
-				c.bgWechatID = c.currentWechatID
-				bgActive = true
-				log.Printf("[BG] Connection lost mid-task, auto-switched to background mode: taskID=%s wechatID=%s", c.bgTaskID, c.bgWechatID)
-			}
-			c.bgMu.Unlock()
+			msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
+				EventType:                string(event.Type),
+				Text:                     event.Text,
+				ToolID:                   event.ToolID,
+				ToolName:                 event.ToolName,
+				ToolInput:                event.ToolInput,
+				ToolOutput:               event.ToolOutput,
+				CostUSD:                  event.CostUSD,
+				IsPartial:                event.IsPartial,
+				SessionID:                event.SessionID,
+				InputTokens:              event.InputTokens,
+				OutputTokens:             event.OutputTokens,
+				CacheCreationInputTokens: event.CacheCreationInputTokens,
+				CacheReadInputTokens:     event.CacheReadInputTokens,
+				ContextWindow:            event.ContextWindow,
+			})
 
-			if bgActive && time.Since(bgLastLog) >= 30*time.Second {
-				bgLastLog = time.Now()
-				log.Printf("[BG] Task still running: events=%d textLen=%d", bgEventCount, len(bgFullText))
-			}
-		} else {
-			// Web UI：追加到会话事件缓冲，支持断线重连回放
-			c.sessionMu.Lock()
-			c.sessionEvents = append(c.sessionEvents, *msg)
-			myIndex := len(c.sessionEvents) - 1
-			shouldSend := myIndex >= c.sentUpTo
-			if shouldSend && uid != "" {
-				c.sentUpTo = len(c.sessionEvents)
-			}
-			if event.Type == EventResult {
-				c.saveSessionEvents()
-			}
-			c.sessionMu.Unlock()
-
-			if uid != "" && shouldSend {
-				msg.To = uid
-				c.send <- msg
-			}
-		}
-
-		// result 事件表示轮次结束，发送 chat_ready
-		if event.Type == EventResult && !bgActive {
 			uid := currentUserID()
-			if uid != "" {
-				readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
-					SessionID: runner.SessionID(),
-				})
-				readyMsg.To = uid
-				c.send <- readyMsg
+
+			if isBot {
+				// Bot API：直接发送，不存 sessionEvents
+				// 后台模式下跳过发送（无人接收，避免 c.send 阻塞）
+				if uid != "" && !bgActive {
+					msg.To = uid
+					c.send <- msg
+				}
+				// 后台模式：收集文本用于异步推送
+				bgText.add(event)
+				switch event.Type {
+				case EventResult:
+					bgCostUSD = event.CostUSD
+					gotResult = true
+				case EventError:
+					bgIsError = true
+					bgErrorMsg = event.Text
+					gotError = true
+					lastErrorMsg = event.Text
+				}
+				bgEventCount++
+
+				// 检测连接代数变化（服务器重启/断线重连），自动切换后台模式
+				c.bgMu.Lock()
+				bgActive = c.bgMode
+				if !bgActive && atomic.LoadInt64(&c.connGen) != startGen {
+					c.bgMode = true
+					c.bgTaskID = fmt.Sprintf("auto-bg-%d", time.Now().UnixMilli())
+					c.bgWechatID = c.currentWechatID
+					bgActive = true
+					log.Printf("[BG] Connection lost mid-task, auto-switched to background mode: taskID=%s wechatID=%s", c.bgTaskID, c.bgWechatID)
+				}
+				c.bgMu.Unlock()
+
+				if bgActive && time.Since(bgLastLog) >= 30*time.Second {
+					bgLastLog = time.Now()
+					log.Printf("[BG] Task still running: events=%d textLen=%d", bgEventCount, len(bgText.text()))
+				}
+			} else {
+				// Web UI：追加到会话事件缓冲，支持断线重连回放
+				c.sessionMu.Lock()
+				c.sessionEvents = append(c.sessionEvents, *msg)
+				myIndex := len(c.sessionEvents) - 1
+				shouldSend := myIndex >= c.sentUpTo
+				if shouldSend && uid != "" {
+					c.sentUpTo = len(c.sessionEvents)
+				}
+				if event.Type == EventResult {
+					c.saveSessionEvents()
+				}
+				c.sessionMu.Unlock()
+
+				if uid != "" && shouldSend {
+					msg.To = uid
+					c.send <- msg
+				}
 			}
-		}
+
+			// result 事件表示轮次结束，发送 chat_ready
+			if event.Type == EventResult && !bgActive {
+				uid := currentUserID()
+				if uid != "" {
+					readyMsg, _ := protocol.NewMessage(protocol.TypeChatReady, protocol.SessionInfoPayload{
+						SessionID: runner.SessionID(),
+					})
+					readyMsg.To = uid
+					c.send <- readyMsg
+				}
+			}
 		case <-noOutputTimer.C:
 			// 30 min no events, Claude stuck, force kill
 			log.Printf("[TIMEOUT] No events for %v, killing engine process", noOutputTimeout)
@@ -836,35 +856,25 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 	}
 
 streamEnded:
-	log.Printf("[BG] Stream ended, checking background mode: bgMode=%v textLen=%d", c.bgMode, len(bgFullText))
+	c.bgMu.Lock()
+	backgroundMode := c.bgMode
+	c.bgMu.Unlock()
+	log.Printf("[BG] Stream ended, checking background mode: bgMode=%v textLen=%d", backgroundMode, len(bgText.text()))
 
 	// 非正常结束：收到 error 但没有收到 result（如 context window 满）
 	if !gotResult && gotError {
 		log.Printf("[CTX] Stream ended with error, no result: isBot=%v msg=%s", isBot, lastErrorMsg)
 		if isBot {
-			// Bot（微信端）：主动推送错误通知
+			// Bot（微信端）：前台错误应返回给当前请求，不能伪装成一条后台完成通知。
 			if !bgActive {
-				c.bgMu.Lock()
-				wechatID := c.currentWechatID
-				c.bgMu.Unlock()
-				if wechatID != "" {
-					pushText := lastErrorMsg
-					if isContextWindowError(lastErrorMsg) {
-						pushText = "上下文已满，已自动新建会话，请重新发送你的消息。"
-					}
-					resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, protocol.BackgroundResultPayload{
-						TaskID:    fmt.Sprintf("error-%d", time.Now().UnixMilli()),
-						WechatID:  wechatID,
-						IsError:   true,
-						ErrorMsg:  pushText,
-						CreatedAt: time.Now().UnixMilli(),
+				uid := currentUserID()
+				if uid != "" {
+					errMsg, _ := protocol.NewMessage(protocol.TypeChatError, protocol.ErrorPayload{
+						Code:    500,
+						Message: lastErrorMsg,
 					})
-					select {
-					case c.send <- resultMsg:
-						log.Printf("[CTX] Error pushed to wechat")
-					case <-time.After(10 * time.Second):
-						log.Printf("[CTX] WARNING: Failed to push error to wechat")
-					}
+					errMsg.To = uid
+					c.send <- errMsg
 				}
 			}
 			// 自动重置 bot session
@@ -928,11 +938,12 @@ streamEnded:
 	c.bgMu.Unlock()
 
 	if bgActive {
-		log.Printf("[BG] Background task completed: taskID=%s textLen=%d", bgTask, len(bgFullText))
+		fullText := bgText.text()
+		log.Printf("[BG] Background task completed: taskID=%s textLen=%d", bgTask, len(fullText))
 		payload := protocol.BackgroundResultPayload{
 			TaskID:    bgTask,
 			WechatID:  bgWechat,
-			FullText:  bgFullText,
+			FullText:  fullText,
 			IsError:   bgIsError,
 			ErrorMsg:  bgErrorMsg,
 			CostUSD:   bgCostUSD,

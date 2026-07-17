@@ -398,13 +398,32 @@ func (m *WeChatManager) handleMessage(idx string, user *wechatUserState, msg ILi
 
 // wechatChatResponse Hub 聊天响应
 type wechatChatResponse struct {
-	FullText     string
-	ToolCalls    []string
-	CostUSD      float64
-	IsError      bool
-	ErrorMsg     string
-	IsBackground bool   // 超时转后台
-	BgTaskID     string // 后台任务 ID
+	FullText       string
+	ToolCalls      []string
+	CostUSD        float64
+	IsError        bool
+	ErrorMsg       string
+	IsBackground   bool   // 超时转后台
+	BgTaskID       string // 后台任务 ID
+	hasStreamDelta bool
+}
+
+// collectText 以 result 的非空文本作为最终答案；此前的 text/stream_delta 仅作兼容回退。
+// Claude 的一次任务可包含多段工具执行进度，不能让第一段进度覆盖最终 result。
+func (r *wechatChatResponse) collectText(eventType, text string) {
+	switch eventType {
+	case "stream_delta":
+		r.hasStreamDelta = true
+		r.FullText += text
+	case "text":
+		if !r.hasStreamDelta {
+			r.FullText = text
+		}
+	case "result":
+		if strings.TrimSpace(text) != "" {
+			r.FullText = text
+		}
+	}
 }
 
 // chatViaHub 通过 Hub 直接路由消息（不走 HTTP）
@@ -475,7 +494,6 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 
 	// 收集响应
 	result := &wechatChatResponse{}
-	hasStreamDelta := false
 	timeout := time.NewTimer(3 * time.Minute)
 	defer timeout.Stop()
 	hardTimeout := time.NewTimer(30 * time.Minute)
@@ -496,22 +514,13 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 				}
 				switch payload.EventType {
 				case "stream_delta":
-					// 增量文本片段，累加
-					hasStreamDelta = true
-					result.FullText += payload.Text
+					result.collectText(payload.EventType, payload.Text)
 					timeout.Reset(3 * time.Minute)
 				case "text":
-					// assistant 消息中的完整文本块
-					// 如果有 stream_delta 则跳过（避免重复），否则作为唯一文本源
-					if !hasStreamDelta {
-						result.FullText = payload.Text
-					}
+					result.collectText(payload.EventType, payload.Text)
 					timeout.Reset(3 * time.Minute)
 				case "result":
-					// result 包含完整回复文本，仅在没有其他来源时使用
-					if !hasStreamDelta && result.FullText == "" {
-						result.FullText = payload.Text
-					}
+					result.collectText(payload.EventType, payload.Text)
 					result.CostUSD = payload.CostUSD
 				case "tool_start", "tool_end", "thinking":
 					// 任何来自 Claude 的事件都说明进程活跃，应重置超时。
