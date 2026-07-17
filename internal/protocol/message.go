@@ -24,14 +24,14 @@ const (
 	// 聊天模式
 	TypeChatInput   MessageType = "chat_input"   // 用户发送聊天消息
 	TypeChatAck     MessageType = "chat_ack"     // 客户端确认收到聊天消息
-	TypeChatMessage MessageType = "chat_message"  // Claude 结构化输出事件
-	TypeChatReady   MessageType = "chat_ready"    // Claude 处理完毕，可接受新输入
-	TypeChatError   MessageType = "chat_error"    // Claude 处理错误
+	TypeChatMessage MessageType = "chat_message" // Claude 结构化输出事件
+	TypeChatReady   MessageType = "chat_ready"   // Claude 处理完毕，可接受新输入
+	TypeChatError   MessageType = "chat_error"   // Claude 处理错误
 
 	// 会话管理
 	TypeKillSession MessageType = "kill_session" // 销毁 tmux 会话
 	TypeNewSession  MessageType = "new_session"  // 开始新 Claude 会话
-	TypeSessionInfo MessageType = "session_info"  // 会话元数据
+	TypeSessionInfo MessageType = "session_info" // 会话元数据
 
 	// 状态管理
 	TypeList   MessageType = "list"   // 列出客户端
@@ -49,9 +49,9 @@ const (
 	TypeError MessageType = "error"
 
 	// 后台任务
-	TypeBackgroundMode   MessageType = "background_mode"    // Server→Client: 当前任务转后台模式
-	TypeBackgroundStart  MessageType = "background_start"   // Server→Client: 启动新后台任务
-	TypeBackgroundResult MessageType = "background_result"   // Client→Server: 后台任务完成
+	TypeBackgroundMode   MessageType = "background_mode"   // Server→Client: 当前任务转后台模式
+	TypeBackgroundStart  MessageType = "background_start"  // Server→Client: 启动新后台任务
+	TypeBackgroundResult MessageType = "background_result" // Client→Server: 后台任务完成
 
 	// 配置管理
 	TypeConfigUpdate MessageType = "config_update" // UI/Server→Client: 更新运行时配置
@@ -194,7 +194,7 @@ type BackgroundResultPayload struct {
 	ErrorMsg  string  `json:"error_msg,omitempty"`
 	CostUSD   float64 `json:"cost_usd,omitempty"`
 	CreatedAt int64   `json:"created_at,omitempty"` // 生成时间(UnixMilli)，server 据此做时效校验
-	IsResend  bool    `json:"is_resend,omitempty"`  // 是否为重连后重发（豁免时效校验，仍做去重）
+	IsResend  bool    `json:"is_resend,omitempty"`  // 是否为重连后重发（用于日志与展示；仍受时效校验）
 }
 
 // NewMessage 创建新消息
@@ -230,7 +230,7 @@ type ConfigUpdatePayload struct {
 
 // ConfigInfoPayload 当前配置信息（Client→UI/Server）
 type ConfigInfoPayload struct {
-	EnvFile   string   `json:"env_file"`             // 当前 env_file 路径
-	Providers []string `json:"providers,omitempty"`  // 可用 provider 列表
-	Error     string   `json:"error,omitempty"`      // 错误信息
+	EnvFile   string   `json:"env_file"`            // 当前 env_file 路径
+	Providers []string `json:"providers,omitempty"` // 可用 provider 列表
+	Error     string   `json:"error,omitempty"`     // 错误信息
 }

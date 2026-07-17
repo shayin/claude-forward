@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,14 +23,22 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+const (
+	backgroundResultTTL       = 5 * time.Minute
+	backgroundDedupRetention  = 10 * time.Minute
+	backgroundMaxClockSkew    = time.Minute
+	backgroundPushesStateFile = "background-pushed.json"
+)
+
 // Handler WebSocket 处理器
 type Handler struct {
 	hub           *Hub
 	auth          *Auth
-	encryptionKey []byte          // 应用层加密密钥（nil 表示不加密）
+	encryptionKey []byte         // 应用层加密密钥（nil 表示不加密）
 	wechatMgr     *WeChatManager // 微信管理器（可选，用于后台任务推送）
 	bgPushedMu    sync.Mutex
 	bgPushed      map[string]int64 // taskID → 推送时间(UnixMilli)，LRU 去重防断线堆积重连洪泛
+	bgPushedPath  string           // 已推送任务 ID 的持久化状态，跨服务端重启去重
 }
 
 // NewHandler 创建处理器
@@ -44,6 +54,83 @@ func NewHandler(hub *Hub, auth *Auth, encryptionKey []byte) *Handler {
 // SetWeChatManager 设置微信管理器
 func (h *Handler) SetWeChatManager(mgr *WeChatManager) {
 	h.wechatMgr = mgr
+	if mgr == nil {
+		return
+	}
+
+	h.bgPushedMu.Lock()
+	h.bgPushedPath = filepath.Join(mgr.dataDir, backgroundPushesStateFile)
+	h.loadBackgroundPushesLocked(time.Now())
+	h.bgPushedMu.Unlock()
+}
+
+func (h *Handler) loadBackgroundPushesLocked(now time.Time) {
+	data, err := os.ReadFile(h.bgPushedPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[BG] Failed to read pushed-task state: %v", err)
+		}
+		return
+	}
+
+	var persisted map[string]int64
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		log.Printf("[BG] Failed to parse pushed-task state: %v", err)
+		return
+	}
+	for taskID, pushedAt := range persisted {
+		if h.isBackgroundPushRecordValid(pushedAt, now.UnixMilli()) {
+			h.bgPushed[taskID] = pushedAt
+		}
+	}
+}
+
+func (h *Handler) isBackgroundPushRecordValid(pushedAt, now int64) bool {
+	age := now - pushedAt
+	return age >= 0 && age <= backgroundDedupRetention.Milliseconds()
+}
+
+func (h *Handler) pruneBackgroundPushesLocked(now int64) {
+	for taskID, pushedAt := range h.bgPushed {
+		if !h.isBackgroundPushRecordValid(pushedAt, now) {
+			delete(h.bgPushed, taskID)
+		}
+	}
+}
+
+// saveBackgroundPushesLocked 原子写入去重状态；调用方必须持有 bgPushedMu。
+func (h *Handler) saveBackgroundPushesLocked() {
+	if h.bgPushedPath == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(h.bgPushedPath), 0755); err != nil {
+		log.Printf("[BG] Failed to create pushed-task state directory: %v", err)
+		return
+	}
+	data, err := json.Marshal(h.bgPushed)
+	if err != nil {
+		log.Printf("[BG] Failed to marshal pushed-task state: %v", err)
+		return
+	}
+	tempFile, err := os.CreateTemp(filepath.Dir(h.bgPushedPath), ".background-pushed-*")
+	if err != nil {
+		log.Printf("[BG] Failed to create pushed-task state file: %v", err)
+		return
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		log.Printf("[BG] Failed to write pushed-task state: %v", err)
+		return
+	}
+	if err := tempFile.Close(); err != nil {
+		log.Printf("[BG] Failed to close pushed-task state: %v", err)
+		return
+	}
+	if err := os.Rename(tempPath, h.bgPushedPath); err != nil {
+		log.Printf("[BG] Failed to save pushed-task state: %v", err)
+	}
 }
 
 // HandleWS 处理 WebSocket 连接
@@ -415,25 +502,26 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 
 	// P0-b: 时效 + 去重闸门（防断线堆积的 BackgroundResult 重连后洪泛）
 	now := time.Now().UnixMilli()
-	const bgResultTTL = 5 * 60 * 1000 // 5 分钟
-	if !payload.IsResend && payload.CreatedAt > 0 && now-payload.CreatedAt > bgResultTTL {
+	if payload.CreatedAt <= 0 {
+		log.Printf("[BG] Rejected background result without creation time: taskID=%s", payload.TaskID)
+		return
+	}
+	if payload.CreatedAt > now+backgroundMaxClockSkew.Milliseconds() {
+		log.Printf("[BG] Rejected background result from the future: taskID=%s createdAt=%d", payload.TaskID, payload.CreatedAt)
+		return
+	}
+	if now-payload.CreatedAt > backgroundResultTTL.Milliseconds() {
 		log.Printf("[BG] Rejected stale background result: taskID=%s age=%dms (>5min)", payload.TaskID, now-payload.CreatedAt)
 		return
 	}
 	h.bgPushedMu.Lock()
+	h.pruneBackgroundPushesLocked(now)
 	if _, ok := h.bgPushed[payload.TaskID]; ok {
 		h.bgPushedMu.Unlock()
 		log.Printf("[BG] Rejected duplicate background result: taskID=%s", payload.TaskID)
 		return
 	}
 	h.bgPushed[payload.TaskID] = now
-	if len(h.bgPushed) > 500 { // 容量清理：超过 500 清理 >10min 的
-		for tid, t := range h.bgPushed {
-			if now-t > 10*60*1000 {
-				delete(h.bgPushed, tid)
-			}
-		}
-	}
 	h.bgPushedMu.Unlock()
 
 	// 推送结果到微信用户
@@ -447,8 +535,14 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 
 	_, err := h.wechatMgr.PushMessage(payload.WechatID, text)
 	if err != nil {
+		h.bgPushedMu.Lock()
+		delete(h.bgPushed, payload.TaskID)
+		h.bgPushedMu.Unlock()
 		log.Printf("[BG] Failed to push background result: taskID=%s err=%v", payload.TaskID, err)
 	} else {
+		h.bgPushedMu.Lock()
+		h.saveBackgroundPushesLocked()
+		h.bgPushedMu.Unlock()
 		log.Printf("[BG] Background result pushed: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
 	}
 }

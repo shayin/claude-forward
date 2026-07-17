@@ -56,4 +56,5 @@ docs/
 wechat-bridge
 
 # WeChat runtime data (push queue, etc.)
+wechat-data/
 internal/server/wechat-data/
