@@ -146,6 +146,18 @@ tmux:
   auto_start: true
 ```
 
+### 本地 HTML 分享
+
+将生成给手机查看的 HTML、CSS、JS 和图片放入独立目录，并在客户端启用：
+
+```yaml
+html_share:
+  root_dir: "~/claude-html-share"
+  # public_base_url: "https://your-domain.example" # 留空时由 server.url 自动推导
+```
+
+客户端会在首次启动时生成并保存独立分享令牌。微信任务在该目录中新建或修改 `.html` / `.htm` 后，最终回复会自动附上预览链接。文件仍只存于本机，云服务器通过现有的出站 WebSocket 连接按需读取；链接仅在客户端在线、文件存在时有效。单文件最大为 16 MiB，且不会跟随目录外的符号链接。
+
 ## 权限审批
 
 Claude Code 执行敏感操作（写文件、运行命令等）时需要你批准。Claude Forward 通过 [PreToolUse Hook](https://docs.anthropic.com/en/docs/claude-code/hooks) 实现远程审批：

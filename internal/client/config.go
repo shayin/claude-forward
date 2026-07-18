@@ -12,12 +12,21 @@ import (
 
 // Config 客户端配置
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Client ClientConfig `yaml:"client"`
-	Tmux   TmuxConfig   `yaml:"tmux"`
-	Claude ClaudeConfig `yaml:"claude"`
-	Codex  CodexConfig  `yaml:"codex"`
-	Path   string       // 工作目录（运行时推导，不来自配置文件）
+	Server    ServerConfig    `yaml:"server"`
+	Client    ClientConfig    `yaml:"client"`
+	Tmux      TmuxConfig      `yaml:"tmux"`
+	Claude    ClaudeConfig    `yaml:"claude"`
+	Codex     CodexConfig     `yaml:"codex"`
+	HTMLShare HTMLShareConfig `yaml:"html_share"`
+	Path      string          // 工作目录（运行时推导，不来自配置文件）
+}
+
+// HTMLShareConfig 配置经云端反向代理对外分享的本地静态目录。
+// RootDir 留空时功能关闭。
+type HTMLShareConfig struct {
+	RootDir       string `yaml:"root_dir"`
+	PublicBaseURL string `yaml:"public_base_url"`
+	TokenFile     string `yaml:"token_file"`
 }
 
 // ServerConfig 服务器连接配置

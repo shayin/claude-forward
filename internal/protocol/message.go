@@ -56,6 +56,10 @@ const (
 	// 配置管理
 	TypeConfigUpdate MessageType = "config_update" // UI/Server→Client: 更新运行时配置
 	TypeConfigInfo   MessageType = "config_info"   // Client→UI/Server: 返回当前配置信息
+
+	// 本地 HTML 分享：Server 通过既有长连接向 Client 获取静态文件
+	TypeFileRequest  MessageType = "file_request"
+	TypeFileResponse MessageType = "file_response"
 )
 
 // Message WebSocket 消息格式
@@ -233,4 +237,22 @@ type ConfigInfoPayload struct {
 	EnvFile   string   `json:"env_file"`            // 当前 env_file 路径
 	Providers []string `json:"providers,omitempty"` // 可用 provider 列表
 	Error     string   `json:"error,omitempty"`     // 错误信息
+}
+
+// FileRequestPayload 是 Server 向本地 Client 请求分享文件的载荷。
+// Token 只在 Client 本地验证，避免服务端持久化 HTML 分享凭据。
+type FileRequestPayload struct {
+	RequestID string `json:"request_id"`
+	Token     string `json:"token"`
+	Path      string `json:"path"`
+}
+
+// FileResponsePayload 是 Client 返回给 Server 的分享文件结果。
+// Content 会由 JSON 编码为 base64；服务端收到后原样写回 HTTP 响应。
+type FileResponsePayload struct {
+	RequestID   string `json:"request_id"`
+	Path        string `json:"path"`
+	StatusCode  int    `json:"status_code"`
+	ContentType string `json:"content_type,omitempty"`
+	Content     []byte `json:"content,omitempty"`
 }

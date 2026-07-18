@@ -57,6 +57,7 @@ func main() {
 
 	// 设置路由
 	http.HandleFunc("/ws", handler.HandleWS)
+	http.HandleFunc("/share/", handler.HandleShare)
 	http.HandleFunc("/api/clients", func(w http.ResponseWriter, r *http.Request) {
 		// CORS
 		w.Header().Set("Access-Control-Allow-Origin", "*")

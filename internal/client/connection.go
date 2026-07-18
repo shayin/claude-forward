@@ -60,6 +60,7 @@ type Client struct {
 	// P1-c: 重连后延迟重放的旧后台结果（新结果送达后再推，加 ⏮ 前缀，避免顺序错乱）
 	bgResendMu    sync.Mutex
 	bgResendQueue []protocol.BackgroundResultPayload
+	htmlShare     *HTMLShare
 }
 
 // pendingMsg 排队的微信消息（任务进行中时存，含完整上下文防 WechatID 串扰）
@@ -210,6 +211,13 @@ func (c *Client) Shutdown() {
 
 // Run 运行客户端（带重连）
 func (c *Client) Run() {
+	// 分享目录在启动时校验并加载持久化令牌；配置错误不影响主聊天能力。
+	share, err := newHTMLShare(c.config)
+	if err != nil {
+		log.Printf("HTML sharing disabled: %v", err)
+	} else {
+		c.htmlShare = share
+	}
 	// 初始化 tmux 管理器
 	c.tmux = NewTmuxManager(c.config.Tmux)
 
@@ -274,7 +282,7 @@ func (c *Client) readPump() {
 		c.cancel()
 	}()
 
-	c.conn.SetReadLimit(512 * 1024)
+	c.conn.SetReadLimit(24 << 20) // file_response 的 16 MiB 内容经 base64 编码后约 22 MiB
 	c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -585,6 +593,15 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		infoMsg, _ := protocol.NewMessage(protocol.TypeConfigInfo, info)
 		infoMsg.To = msg.From
 		c.send <- infoMsg
+
+	case protocol.TypeFileRequest:
+		var payload protocol.FileRequestPayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			return
+		}
+		response := c.htmlShare.read(payload)
+		responseMsg, _ := protocol.NewMessage(protocol.TypeFileResponse, response)
+		c.send <- responseMsg
 	}
 }
 
@@ -651,6 +668,8 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 
 	// Bot API 使用独立 session（与 Web UI 隔离），不存 sessionEvents
 	isBot := strings.HasPrefix(userID, "bot-")
+	shareBefore := c.htmlShare.snapshot()
+	var shareLinks string
 
 	// 立即发送确认，让 UI 知道消息已被接收
 	ackMsg, _ := protocol.NewMessage(protocol.TypeChatAck, nil)
@@ -759,6 +778,19 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 				}
 			}
 
+			// 微信 Bot 的最终回复与后台推送都使用这一份最终文本；在 result 到达时
+			// 扫描任务开始后的目录变更，避免依赖 AI 主动报告输出路径。
+			originalEventText := event.Text
+			if isBot && event.Type == EventResult {
+				shareLinks = c.htmlShare.linksText(c.config.Client.ID, shareBefore)
+				if shareLinks != "" {
+					if event.Text != "" {
+						event.Text += "\n\n"
+					}
+					event.Text += shareLinks
+				}
+			}
+
 			msg, _ := protocol.NewMessage(protocol.TypeChatMessage, protocol.ChatMessagePayload{
 				EventType:                string(event.Type),
 				Text:                     event.Text,
@@ -786,7 +818,10 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 					c.send <- msg
 				}
 				// 后台模式：收集文本用于异步推送
-				bgText.add(event)
+				// 链接是展示层附加内容，不能让 Codex 空 result 的链接覆盖已收集的最终文本。
+				collectorEvent := event
+				collectorEvent.Text = originalEventText
+				bgText.add(collectorEvent)
 				switch event.Type {
 				case EventResult:
 					bgCostUSD = event.CostUSD
@@ -939,6 +974,12 @@ streamEnded:
 
 	if bgActive {
 		fullText := bgText.text()
+		if shareLinks != "" {
+			if fullText != "" {
+				fullText += "\n\n"
+			}
+			fullText += shareLinks
+		}
 		log.Printf("[BG] Background task completed: taskID=%s textLen=%d", bgTask, len(fullText))
 		payload := protocol.BackgroundResultPayload{
 			TaskID:    bgTask,

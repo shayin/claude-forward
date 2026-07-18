@@ -39,6 +39,7 @@ type Handler struct {
 	bgPushedMu    sync.Mutex
 	bgPushed      map[string]int64 // taskID → 推送时间(UnixMilli)，LRU 去重防断线堆积重连洪泛
 	bgPushedPath  string           // 已推送任务 ID 的持久化状态，跨服务端重启去重
+	shareBroker   *shareRequestBroker
 }
 
 // NewHandler 创建处理器
@@ -48,6 +49,7 @@ func NewHandler(hub *Hub, auth *Auth, encryptionKey []byte) *Handler {
 		auth:          auth,
 		encryptionKey: encryptionKey,
 		bgPushed:      make(map[string]int64),
+		shareBroker:   newShareRequestBroker(),
 	}
 }
 
@@ -174,7 +176,7 @@ func (h *Handler) readPump(conn *Connection) {
 		conn.Conn.Close()
 	}()
 
-	conn.Conn.SetReadLimit(512 * 1024) // 512KB
+	conn.Conn.SetReadLimit(24 << 20) // 支持 16 MiB 文件经 JSON/base64 回传
 	conn.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	conn.Conn.SetPongHandler(func(string) error {
 		conn.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -297,6 +299,16 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 
 	case protocol.TypeBackgroundResult:
 		h.handleBackgroundResult(conn, msg)
+
+	case protocol.TypeFileResponse:
+		if conn.Type != ConnTypeClient {
+			return
+		}
+		var payload protocol.FileResponsePayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			return
+		}
+		h.shareBroker.resolve(payload)
 	}
 }
 

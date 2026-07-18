@@ -32,3 +32,9 @@ codex:
                                     #   dangerously-bypass-approvals-and-sandbox（无限制含联网，仅在自己机器上用）
   model: ""                        # 默认模型，留空用 codex 内置默认；微信可用 /model 运行时切换
   work_dir: ""                     # 可选工作目录，留空用当前目录（通常与 cc 一致）
+
+# 本地 HTML 分享（默认关闭）。云端通过既有 WebSocket 长连接读取该目录中的静态资源。
+# html_share:
+#   root_dir: "~/claude-html-share" # 留空则关闭；仅允许此目录内的普通文件
+#   public_base_url: ""             # 可选，如 https://example.com；留空由 server.url 推导
+#   token_file: ""                  # 可选令牌保存位置；留空保存到项目 .claude-forward 目录
