@@ -52,6 +52,7 @@ const (
 	TypeBackgroundMode   MessageType = "background_mode"   // Server→Client: 当前任务转后台模式
 	TypeBackgroundStart  MessageType = "background_start"  // Server→Client: 启动新后台任务
 	TypeBackgroundResult MessageType = "background_result" // Client→Server: 后台任务完成
+	TypeBackgroundAck    MessageType = "background_ack"    // Server→Client: 后台结果已接收
 
 	// 配置管理
 	TypeConfigUpdate MessageType = "config_update" // UI/Server→Client: 更新运行时配置
@@ -199,6 +200,11 @@ type BackgroundResultPayload struct {
 	CostUSD   float64 `json:"cost_usd,omitempty"`
 	CreatedAt int64   `json:"created_at,omitempty"` // 生成时间(UnixMilli)，server 据此做时效校验
 	IsResend  bool    `json:"is_resend,omitempty"`  // 是否为重连后重发（用于日志与展示；仍受时效校验）
+}
+
+// BackgroundAckPayload 确认服务端已接收（或已去重）后台结果，客户端可删除本地待发文件。
+type BackgroundAckPayload struct {
+	TaskID string `json:"task_id"`
 }
 
 // NewMessage 创建新消息

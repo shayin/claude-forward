@@ -17,6 +17,8 @@ import (
 	"github.com/shayin/claude-forward/internal/protocol"
 )
 
+const backgroundResultRetryTTL = 5 * time.Minute
+
 // Client 客户端
 type Client struct {
 	config        *Config
@@ -580,6 +582,13 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.bgWechatID = payload.WechatID
 		c.bgMu.Unlock()
 
+	case protocol.TypeBackgroundAck:
+		var payload protocol.BackgroundAckPayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			return
+		}
+		c.removePendingResult(payload.TaskID)
+
 	case protocol.TypeConfigUpdate:
 		var payload protocol.ConfigUpdatePayload
 		if err := msg.ParsePayload(&payload); err != nil {
@@ -990,20 +999,15 @@ streamEnded:
 			CostUSD:   bgCostUSD,
 			CreatedAt: time.Now().UnixMilli(),
 		}
-		// P0-a: 任务生命周期内断过线（connGen 变化）→ 旧 writePump 已失效，c.send 不可靠 → 直接落盘
-		// 重连后只走 resendPendingResults 单一路径，避免堆积消息重连后一次性 flush 洪泛
-		if atomic.LoadInt64(&c.connGen) != startGen {
-			log.Printf("[BG] connGen changed during task (start=%d now=%d), persisting to disk", startGen, atomic.LoadInt64(&c.connGen))
-			c.savePendingResult(payload)
-		} else {
+		// 先落盘；只有收到 Server ACK 才删除。写入 c.send 不等于 WebSocket 已送达。
+		c.savePendingResult(payload)
+		if atomic.LoadInt64(&c.connGen) == startGen {
 			resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
 			select {
 			case c.send <- resultMsg:
-				log.Printf("[BG] BackgroundResult sent successfully")
-				c.flushBgResendQueue() // P1-c: 新结果送达后，推送积压的旧结果（⏮ 前缀）
+				log.Printf("[BG] BackgroundResult queued, awaiting server ACK")
 			case <-time.After(30 * time.Second):
-				log.Printf("[BG] WARNING: Failed to send BackgroundResult, persisting to disk")
-				c.savePendingResult(payload)
+				log.Printf("[BG] WARNING: Failed to queue BackgroundResult; will retry after reconnect")
 			}
 		}
 	}
@@ -1164,8 +1168,16 @@ func (c *Client) savePendingResult(payload protocol.BackgroundResultPayload) {
 	}
 }
 
-// resendPendingResults 读盘 → 存内存延迟重放队列 → 立即删盘
-// P1-c: 延迟到新结果送达后再推（加 ⏮ 前缀），避免重连后旧结果先于新结果到达造成顺序错乱
+func (c *Client) removePendingResult(taskID string) {
+	if taskID == "" {
+		return
+	}
+	if err := os.Remove(filepath.Join(c.pendingResultsDir(), taskID+".json")); err != nil && !os.IsNotExist(err) {
+		log.Printf("[BG] Failed to remove acknowledged pending result: taskID=%s err=%v", taskID, err)
+	}
+}
+
+// resendPendingResults 仅重发服务端时效窗口内的结果。过期文件直接删除，避免旧消息复活。
 func (c *Client) resendPendingResults() {
 	dir := c.pendingResultsDir()
 	if dir == "" {
@@ -1175,7 +1187,6 @@ func (c *Client) resendPendingResults() {
 	if err != nil {
 		return // 目录不存在
 	}
-	c.bgResendMu.Lock()
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -1191,26 +1202,19 @@ func (c *Client) resendPendingResults() {
 			os.Remove(path)
 			continue
 		}
-		// taskID 去重（防多次 Connect 累积重复）
-		dup := false
-		for _, p := range c.bgResendQueue {
-			if p.TaskID == payload.TaskID {
-				dup = true
-				break
-			}
+		if payload.CreatedAt <= 0 || time.Since(time.UnixMilli(payload.CreatedAt)) > backgroundResultRetryTTL {
+			log.Printf("[BG] Removing expired pending result: taskID=%s", payload.TaskID)
+			os.Remove(path)
+			continue
 		}
-		os.Remove(path) // mark 时立即删盘，杜绝多次 Connect 重复
-		if !dup {
-			payload.IsResend = true
-			c.bgResendQueue = append(c.bgResendQueue, payload)
-			log.Printf("[BG] Pending result marked for delayed replay: taskID=%s", payload.TaskID)
+		payload.IsResend = true
+		resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
+		select {
+		case c.send <- resultMsg:
+			log.Printf("[BG] Re-sent pending result awaiting ACK: taskID=%s", payload.TaskID)
+		default:
+			log.Printf("[BG] Send queue full; keeping pending result: taskID=%s", payload.TaskID)
 		}
-	}
-	queueLen := len(c.bgResendQueue)
-	c.bgResendMu.Unlock()
-	// 超时兜底：若重连后 3 分钟内无新结果送达，也 flush（避免用户不发消息时旧结果永久卡住）
-	if queueLen > 0 {
-		time.AfterFunc(3*time.Minute, c.flushBgResendQueue)
 	}
 }
 

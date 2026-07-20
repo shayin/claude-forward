@@ -503,6 +503,14 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 		log.Printf("[BG] Failed to parse background_result: %v", err)
 		return
 	}
+	ack := func() {
+		ackMsg, _ := protocol.NewMessage(protocol.TypeBackgroundAck, protocol.BackgroundAckPayload{TaskID: payload.TaskID})
+		select {
+		case conn.Send <- ackMsg:
+		default:
+			log.Printf("[BG] BackgroundAck queue full: taskID=%s", payload.TaskID)
+		}
+	}
 
 	log.Printf("[BG] Received background result: taskID=%s wechatID=%s isError=%v textLen=%d",
 		payload.TaskID, payload.WechatID, payload.IsError, len(payload.FullText))
@@ -531,6 +539,7 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 	if _, ok := h.bgPushed[payload.TaskID]; ok {
 		h.bgPushedMu.Unlock()
 		log.Printf("[BG] Rejected duplicate background result: taskID=%s", payload.TaskID)
+		ack()
 		return
 	}
 	h.bgPushed[payload.TaskID] = now
@@ -556,6 +565,7 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 		h.saveBackgroundPushesLocked()
 		h.bgPushedMu.Unlock()
 		log.Printf("[BG] Background result pushed: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
+		ack()
 	}
 }
 
