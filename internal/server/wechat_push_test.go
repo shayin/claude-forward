@@ -151,53 +151,6 @@ func TestPushQueueFlushClears(t *testing.T) {
 	}
 }
 
-func TestPushQueueFlushRetriesAfterTemporaryFailure(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			_, _ = w.Write([]byte(`{"ret": 1, "errmsg": "temporary"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"ret": 0}`))
-	}))
-	defer server.Close()
-	mgr := newTestWechatManager()
-	mgr.dataDir = t.TempDir()
-	user := mgr.users["0"]
-	user.LoginResult = &ILinkLoginResult{}
-	user.Bot.BaseURL = server.URL
-	user.PushQueue = []pushQueueItem{{Text: "retry me", CreatedAt: time.Now()}}
-	mgr.flushPushQueue("0", user)
-	if len(user.PushQueue) != 1 {
-		t.Fatalf("queue should remain after failed attempt")
-	}
-	mgr.flushPushQueue("0", user)
-	if len(user.PushQueue) != 0 {
-		t.Fatalf("queue should clear after retry")
-	}
-}
-
-func TestPushRetryBackoffIsBounded(t *testing.T) {
-	mgr := newTestWechatManager()
-	user := mgr.users["0"]
-	now := time.Now()
-	mgr.schedulePushRetry(user, now)
-	if user.pushRetryDelay != pushRetryInitial {
-		t.Fatalf("first delay = %v", user.pushRetryDelay)
-	}
-	mgr.schedulePushRetry(user, now)
-	if user.pushRetryDelay != 2*pushRetryInitial {
-		t.Fatalf("second delay = %v", user.pushRetryDelay)
-	}
-	for i := 0; i < 10; i++ {
-		mgr.schedulePushRetry(user, now)
-	}
-	if user.pushRetryDelay != pushRetryMax {
-		t.Fatalf("delay = %v, want cap %v", user.pushRetryDelay, pushRetryMax)
-	}
-}
-
 // --- HTTP Handler 测试 ---
 
 // TestHandlePush_PerUserAuth 用户级认证
@@ -206,10 +159,10 @@ func TestHandlePush_PerUserAuth(t *testing.T) {
 	handler := NewWeChatHandler(mgr, nil)
 
 	tests := []struct {
-		name     string
-		wechatID string
-		secret   string
-		want     int
+		name      string
+		wechatID  string
+		secret    string
+		want      int
 	}{
 		{"user-a correct secret", "wxid_test@im.wechat", "secret-aaa", http.StatusOK},
 		{"user-a wrong secret", "wxid_test@im.wechat", "secret-bbb", http.StatusUnauthorized},

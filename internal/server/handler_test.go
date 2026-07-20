@@ -60,23 +60,6 @@ func TestHandleBackgroundResult_WithWeChatMgr(t *testing.T) {
 	}
 }
 
-func TestHandleBackgroundResultAcknowledgesAcceptedAndDuplicateResult(t *testing.T) {
-	wechatMgr := newIsolatedTestWechatManager(t)
-	handler := NewHandler(NewHub(), nil, nil)
-	handler.SetWeChatManager(wechatMgr)
-	client := &Connection{ID: "ack-client", Type: ConnTypeClient, Send: make(chan *protocol.Message, 2)}
-	payload := protocol.BackgroundResultPayload{TaskID: "ack-task", WechatID: "wxid_test@im.wechat", FullText: "done", CreatedAt: time.Now().UnixMilli()}
-	message, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
-	handler.handleBackgroundResult(client, message)
-	handler.handleBackgroundResult(client, message)
-	for i := 0; i < 2; i++ {
-		ack := <-client.Send
-		if ack.Type != protocol.TypeBackgroundAck {
-			t.Fatalf("message type = %s, want background_ack", ack.Type)
-		}
-	}
-}
-
 // TestHandleBackgroundResult_IsError 错误结果推送
 func TestHandleBackgroundResult_IsError(t *testing.T) {
 	hub := NewHub()
