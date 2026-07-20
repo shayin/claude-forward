@@ -33,7 +33,10 @@ type wechatUserState struct {
 	QRDeadline time.Time
 
 	// Push 离线队列
-	PushQueue []pushQueueItem
+	PushQueue      []pushQueueItem
+	pushMu         sync.Mutex // 串行化同一用户的队列投递，避免定时重试与登录重放并发
+	pushRetryAt    time.Time
+	pushRetryDelay time.Duration
 
 	// P1-a: 消息串行队列（保证同一用户消息按发送序处理，避免并发抢写导致顺序错乱/丢失）
 	MsgQueue chan ILinkIncomingMessage
@@ -86,6 +89,7 @@ func (m *WeChatManager) Start() {
 	// P1-a: 为每个用户启动串行消息处理 goroutine（永久运行，stopCh 退出）
 	for idx, user := range m.users {
 		go m.processLoop(idx, user)
+		go m.pushRetryLoop(idx, user)
 	}
 	// P2: 恢复 UpdateBuf（避免服务端重启后游标归零导致 iLink 重投递断线期间消息）
 	for idx, user := range m.users {
@@ -124,6 +128,57 @@ func (m *WeChatManager) Start() {
 	for idx, user := range m.users {
 		m.loadBindings(idx, user)
 	}
+}
+
+const (
+	pushRetryInterval = 5 * time.Second
+	pushRetryInitial  = 10 * time.Second
+	pushRetryMax      = 5 * time.Minute
+)
+
+// pushRetryLoop 让在线状态下暂时失败的 PushQueue 自动重试；失败条目仍保留在磁盘。
+func (m *WeChatManager) pushRetryLoop(idx string, user *wechatUserState) {
+	ticker := time.NewTicker(pushRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case now := <-ticker.C:
+			m.mu.Lock()
+			loggedIn := user.LoginResult != nil && !user.stopped
+			queued := len(user.PushQueue) > 0
+			due := user.pushRetryAt.IsZero() || !now.Before(user.pushRetryAt)
+			m.mu.Unlock()
+			if loggedIn && queued && due {
+				if m.flushPushQueue(idx, user) {
+					m.resetPushRetry(user)
+				} else {
+					m.schedulePushRetry(user, now)
+				}
+			}
+		case <-user.stopCh:
+			return
+		}
+	}
+}
+
+func (m *WeChatManager) resetPushRetry(user *wechatUserState) {
+	m.mu.Lock()
+	user.pushRetryAt, user.pushRetryDelay = time.Time{}, 0
+	m.mu.Unlock()
+}
+
+func (m *WeChatManager) schedulePushRetry(user *wechatUserState, now time.Time) {
+	m.mu.Lock()
+	if user.pushRetryDelay == 0 {
+		user.pushRetryDelay = pushRetryInitial
+	} else {
+		user.pushRetryDelay *= 2
+		if user.pushRetryDelay > pushRetryMax {
+			user.pushRetryDelay = pushRetryMax
+		}
+	}
+	user.pushRetryAt = now.Add(user.pushRetryDelay)
+	m.mu.Unlock()
 }
 
 // Stop 停止所有会话
@@ -547,8 +602,9 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 			wentBackground = true
 			taskID := uuid.New().String()
 			bgMsg, _ := protocol.NewMessage(protocol.TypeBackgroundMode, protocol.BackgroundModePayload{
-				TaskID:   taskID,
-				WechatID: wechatID,
+				TaskID:      taskID,
+				WechatID:    wechatID,
+				RequesterID: botConn.ID,
 			})
 			safeSend(client.Send, bgMsg)
 			log.Printf("[BG] Task timeout, switching to background: taskID=%s wechatID=%s", taskID, wechatID)
@@ -558,8 +614,9 @@ func (m *WeChatManager) chatViaHub(clientID string, text string, wechatID string
 			wentBackground = true
 			taskID := uuid.New().String()
 			bgMsg, _ := protocol.NewMessage(protocol.TypeBackgroundMode, protocol.BackgroundModePayload{
-				TaskID:   taskID,
-				WechatID: wechatID,
+				TaskID:      taskID,
+				WechatID:    wechatID,
+				RequesterID: botConn.ID,
 			})
 			safeSend(client.Send, bgMsg)
 			log.Printf("[BG] Hard timeout, switching to background: taskID=%s wechatID=%s", taskID, wechatID)
@@ -1071,31 +1128,45 @@ func (m *WeChatManager) PushMessage(wechatID, text string) (string, error) {
 }
 
 // flushPushQueue 投递离线队列中的消息
-func (m *WeChatManager) flushPushQueue(idx string, user *wechatUserState) {
+func (m *WeChatManager) flushPushQueue(idx string, user *wechatUserState) bool {
+	user.pushMu.Lock()
+	defer user.pushMu.Unlock()
+	m.mu.Lock()
 	if len(user.PushQueue) == 0 {
-		return
+		m.mu.Unlock()
+		return true
 	}
+	queue := append([]pushQueueItem(nil), user.PushQueue...)
+	bot := user.Bot
+	wechatID := user.Route.WechatID
+	m.mu.Unlock()
 
-	log.Printf("[PUSH] 投递离线队列 user=%s count=%d", idx, len(user.PushQueue))
+	log.Printf("[PUSH] 投递离线队列 user=%s count=%d", idx, len(queue))
 
-	for i, item := range user.PushQueue {
+	for i, item := range queue {
 		chunks := splitMessage(item.Text, 4000)
 		for _, chunk := range chunks {
-			if err := user.Bot.SendMessage(user.Route.WechatID, chunk, ""); err != nil {
+			if err := bot.SendMessage(wechatID, chunk, ""); err != nil {
 				log.Printf("[PUSH] 投递失败 [user=%s, item=%d]: %v", idx, i, err)
 				// 发送失败，保留剩余消息
-				user.PushQueue = user.PushQueue[i:]
+				m.mu.Lock()
+				newItems := append([]pushQueueItem(nil), user.PushQueue[len(queue):]...)
+				user.PushQueue = append(queue[i:], newItems...)
 				m.savePushQueue(idx, user)
-				return
+				m.mu.Unlock()
+				return false
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
 	// 全部发送成功，清空队列
-	user.PushQueue = nil
+	m.mu.Lock()
+	user.PushQueue = user.PushQueue[len(queue):]
 	m.savePushQueue(idx, user)
+	m.mu.Unlock()
 	log.Printf("[PUSH] 离线队列已清空 user=%s", idx)
+	return true
 }
 
 // savePushQueue 持久化 Push 队列

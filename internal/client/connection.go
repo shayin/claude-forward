@@ -51,6 +51,7 @@ type Client struct {
 	bgMode          bool   // 当前是否处于后台模式
 	bgTaskID        string // 后台任务 ID
 	bgWechatID      string // 完成后推送给谁
+	bgRequesterID   string // 对应 bot 请求 ID，防止超时模式串到下一任务
 	currentWechatID string // 当前正在处理的微信用户 ID（来自 ChatInputPayload.WechatID）
 
 	// P1-b: 任务进行中时排队的消息（存完整上下文防 WechatID 串扰），当前任务完成后递归处理
@@ -578,7 +579,15 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 		c.bgMode = true
 		c.bgTaskID = payload.TaskID
 		c.bgWechatID = payload.WechatID
+		c.bgRequesterID = payload.RequesterID
 		c.bgMu.Unlock()
+
+	case protocol.TypeBackgroundAck:
+		var payload protocol.BackgroundAckPayload
+		if err := msg.ParsePayload(&payload); err != nil {
+			return
+		}
+		c.removePendingResult(payload.TaskID)
 
 	case protocol.TypeConfigUpdate:
 		var payload protocol.ConfigUpdatePayload
@@ -733,9 +742,10 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 	// 又发 background_mode 把 bgMode 设回 true，形成"每句话都误报超时"的死循环。
 	if isBot {
 		c.bgMu.Lock()
-		c.bgMode = false
-		c.bgTaskID = ""
-		c.bgWechatID = ""
+		// 只清理其他 bot 任务遗留的状态；当前任务的 background_mode 可能正排队到达。
+		if c.bgRequesterID != "" && c.bgRequesterID != userID {
+			c.bgMode, c.bgTaskID, c.bgWechatID, c.bgRequesterID = false, "", "", ""
+		}
 		c.bgMu.Unlock()
 	}
 
@@ -836,11 +846,12 @@ func (c *Client) handleChatInput(userID string, text string, depth int) {
 
 				// 检测连接代数变化（服务器重启/断线重连），自动切换后台模式
 				c.bgMu.Lock()
-				bgActive = c.bgMode
+				bgActive = c.bgMode && c.bgRequesterID == userID
 				if !bgActive && atomic.LoadInt64(&c.connGen) != startGen {
 					c.bgMode = true
 					c.bgTaskID = fmt.Sprintf("auto-bg-%d", time.Now().UnixMilli())
 					c.bgWechatID = c.currentWechatID
+					c.bgRequesterID = userID
 					bgActive = true
 					log.Printf("[BG] Connection lost mid-task, auto-switched to background mode: taskID=%s wechatID=%s", c.bgTaskID, c.bgWechatID)
 				}
@@ -953,7 +964,7 @@ streamEnded:
 	if isBot {
 		for i := 0; i < 50; i++ {
 			c.bgMu.Lock()
-			if c.bgMode {
+			if c.bgMode && c.bgRequesterID == userID {
 				c.bgMu.Unlock()
 				break
 			}
@@ -962,13 +973,11 @@ streamEnded:
 		}
 	}
 	c.bgMu.Lock()
-	bgActive = c.bgMode && c.bgWechatID != ""
+	bgActive = c.bgMode && c.bgRequesterID == userID && c.bgWechatID != ""
 	bgTask := c.bgTaskID
 	bgWechat := c.bgWechatID
 	if bgActive {
-		c.bgMode = false
-		c.bgTaskID = ""
-		c.bgWechatID = ""
+		c.bgMode, c.bgTaskID, c.bgWechatID, c.bgRequesterID = false, "", "", ""
 	}
 	c.bgMu.Unlock()
 
@@ -990,20 +999,16 @@ streamEnded:
 			CostUSD:   bgCostUSD,
 			CreatedAt: time.Now().UnixMilli(),
 		}
-		// P0-a: 任务生命周期内断过线（connGen 变化）→ 旧 writePump 已失效，c.send 不可靠 → 直接落盘
-		// 重连后只走 resendPendingResults 单一路径，避免堆积消息重连后一次性 flush 洪泛
-		if atomic.LoadInt64(&c.connGen) != startGen {
-			log.Printf("[BG] connGen changed during task (start=%d now=%d), persisting to disk", startGen, atomic.LoadInt64(&c.connGen))
-			c.savePendingResult(payload)
-		} else {
+		// 先落盘，只有收到 Server ACK 才删除；写入 c.send 不代表 WebSocket 已送达。
+		c.savePendingResult(payload)
+		if atomic.LoadInt64(&c.connGen) == startGen {
 			resultMsg, _ := protocol.NewMessage(protocol.TypeBackgroundResult, payload)
 			select {
 			case c.send <- resultMsg:
-				log.Printf("[BG] BackgroundResult sent successfully")
+				log.Printf("[BG] BackgroundResult queued, awaiting server ACK")
 				c.flushBgResendQueue() // P1-c: 新结果送达后，推送积压的旧结果（⏮ 前缀）
 			case <-time.After(30 * time.Second):
 				log.Printf("[BG] WARNING: Failed to send BackgroundResult, persisting to disk")
-				c.savePendingResult(payload)
 			}
 		}
 	}
@@ -1164,8 +1169,17 @@ func (c *Client) savePendingResult(payload protocol.BackgroundResultPayload) {
 	}
 }
 
-// resendPendingResults 读盘 → 存内存延迟重放队列 → 立即删盘
-// P1-c: 延迟到新结果送达后再推（加 ⏮ 前缀），避免重连后旧结果先于新结果到达造成顺序错乱
+func (c *Client) removePendingResult(taskID string) {
+	if taskID == "" {
+		return
+	}
+	path := filepath.Join(c.pendingResultsDir(), taskID+".json")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Printf("[BG] Failed to remove acknowledged result: taskID=%s err=%v", taskID, err)
+	}
+}
+
+// resendPendingResults 读盘并重发；文件保留到收到服务端 ACK，断线不会丢结果。
 func (c *Client) resendPendingResults() {
 	dir := c.pendingResultsDir()
 	if dir == "" {
@@ -1199,7 +1213,6 @@ func (c *Client) resendPendingResults() {
 				break
 			}
 		}
-		os.Remove(path) // mark 时立即删盘，杜绝多次 Connect 重复
 		if !dup {
 			payload.IsResend = true
 			c.bgResendQueue = append(c.bgResendQueue, payload)
@@ -1208,9 +1221,9 @@ func (c *Client) resendPendingResults() {
 	}
 	queueLen := len(c.bgResendQueue)
 	c.bgResendMu.Unlock()
-	// 超时兜底：若重连后 3 分钟内无新结果送达，也 flush（避免用户不发消息时旧结果永久卡住）
+	// 重连成功即重发；服务端按 taskID 去重并回 ACK。
 	if queueLen > 0 {
-		time.AfterFunc(3*time.Minute, c.flushBgResendQueue)
+		go c.flushBgResendQueue()
 	}
 }
 

@@ -52,6 +52,7 @@ const (
 	TypeBackgroundMode   MessageType = "background_mode"   // Server→Client: 当前任务转后台模式
 	TypeBackgroundStart  MessageType = "background_start"  // Server→Client: 启动新后台任务
 	TypeBackgroundResult MessageType = "background_result" // Client→Server: 后台任务完成
+	TypeBackgroundAck    MessageType = "background_ack"    // Server→Client: 后台结果已可靠接收
 
 	// 配置管理
 	TypeConfigUpdate MessageType = "config_update" // UI/Server→Client: 更新运行时配置
@@ -178,8 +179,14 @@ type PermissionResponsePayload struct {
 
 // BackgroundModePayload 后台模式通知（Server→Client）
 type BackgroundModePayload struct {
-	TaskID   string `json:"task_id"`
-	WechatID string `json:"wechat_id"`
+	TaskID      string `json:"task_id"`
+	WechatID    string `json:"wechat_id"`
+	RequesterID string `json:"requester_id"` // 对应的 bot 连接，防止跨任务竞争
+}
+
+// BackgroundAckPayload 确认服务端已持久化/去重后台结果，客户端可删除本地待重发文件。
+type BackgroundAckPayload struct {
+	TaskID string `json:"task_id"`
 }
 
 // BackgroundStartPayload 启动后台任务（Server→Client）
