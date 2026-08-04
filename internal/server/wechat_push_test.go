@@ -151,6 +151,49 @@ func TestPushQueueFlushClears(t *testing.T) {
 	}
 }
 
+// TestFilterStalePushQueue 离线队列 TTL 过滤
+func TestFilterStalePushQueue(t *testing.T) {
+	now := time.Now()
+	q := []pushQueueItem{
+		{Text: "ancient", CreatedAt: now.Add(-30 * 24 * time.Hour)}, // 30 天前，过时
+		{Text: "old", CreatedAt: now.Add(-2 * 24 * time.Hour)},      // 2 天前，过时
+		{Text: "fresh", CreatedAt: now.Add(-1 * time.Hour)},         // 1 小时前，保留
+		{Text: "no-ts", CreatedAt: time.Time{}},                     // 零值时间戳，保守保留
+	}
+	fresh, dropped := filterStalePushQueue(q, now, 24*time.Hour)
+	if dropped != 2 {
+		t.Errorf("dropped = %d, want 2", dropped)
+	}
+	if len(fresh) != 2 {
+		t.Fatalf("fresh len = %d, want 2", len(fresh))
+	}
+	if fresh[0].Text != "fresh" {
+		t.Errorf("fresh[0] = %q, want %q", fresh[0].Text, "fresh")
+	}
+	if fresh[1].Text != "no-ts" {
+		t.Errorf("fresh[1] = %q, want %q", fresh[1].Text, "no-ts")
+	}
+}
+
+// TestFlushPushQueue_DropsStaleMessages 全过时队列 flush 后清空（且不触发 Bot 投递）
+func TestFlushPushQueue_DropsStaleMessages(t *testing.T) {
+	mgr := newTestWechatManager()
+	mgr.dataDir = t.TempDir()
+	mgr.mu.Lock()
+	user := mgr.users["0"]
+	user.PushQueue = []pushQueueItem{
+		{Text: "stale1", CreatedAt: time.Now().Add(-10 * 24 * time.Hour)},
+		{Text: "stale2", CreatedAt: time.Now().Add(-5 * 24 * time.Hour)},
+	}
+	mgr.mu.Unlock()
+
+	mgr.flushPushQueue("0", user)
+
+	if len(user.PushQueue) != 0 {
+		t.Errorf("queue should be empty after dropping stale, got %d", len(user.PushQueue))
+	}
+}
+
 // --- HTTP Handler 测试 ---
 
 // TestHandlePush_PerUserAuth 用户级认证

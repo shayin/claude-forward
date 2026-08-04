@@ -1070,10 +1070,40 @@ func (m *WeChatManager) PushMessage(wechatID, text string) (string, error) {
 	return "sent", nil
 }
 
+// maxPushQueueAge 离线队列消息最大保留时长：超过则视为过时丢弃，
+// 避免服务端重启后重投积压的历史后台结果（如旧任务汇总、财报转录）。
+const maxPushQueueAge = 24 * time.Hour
+
+// filterStalePushQueue 过滤离线队列中超过 ttl 的过时消息，返回保留项与丢弃数。
+// CreatedAt 为零值（历史数据无时间戳）的项保守保留，不丢弃。
+func filterStalePushQueue(q []pushQueueItem, now time.Time, ttl time.Duration) (fresh []pushQueueItem, dropped int) {
+	fresh = make([]pushQueueItem, 0, len(q))
+	for _, item := range q {
+		if !item.CreatedAt.IsZero() && now.Sub(item.CreatedAt) > ttl {
+			dropped++
+			continue
+		}
+		fresh = append(fresh, item)
+	}
+	return fresh, dropped
+}
+
 // flushPushQueue 投递离线队列中的消息
 func (m *WeChatManager) flushPushQueue(idx string, user *wechatUserState) {
 	if len(user.PushQueue) == 0 {
 		return
+	}
+
+	// 丢弃过时消息（离线队列仅保留近期，避免重启重投积压的旧后台结果）
+	fresh, dropped := filterStalePushQueue(user.PushQueue, time.Now(), maxPushQueueAge)
+	if dropped > 0 {
+		log.Printf("[PUSH] 丢弃 %d 条过时离线消息 user=%s (超过 %s)", dropped, idx, maxPushQueueAge)
+		user.PushQueue = fresh
+		m.savePushQueue(idx, user)
+		if len(user.PushQueue) == 0 {
+			log.Printf("[PUSH] 离线队列已清空 user=%s (全部过时)", idx)
+			return
+		}
 	}
 
 	log.Printf("[PUSH] 投递离线队列 user=%s count=%d", idx, len(user.PushQueue))
