@@ -650,6 +650,8 @@ func (cm *ClaudeManager) injectUserEnv(cmd *exec.Cmd) {
 }
 
 // parseEnvFile 解析包含 export KEY=VALUE 的 shell 文件，返回键值对
+// 兼容三种写法：export K="v"（双引号）、export K='v'（单引号）、export K=v（无引号）。
+// Go regexp 是 RE2，不支持反向引用，因此先抓等号右边的原始值再去掉首尾配对的引号。
 func parseEnvFile(path string) map[string]string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -658,13 +660,23 @@ func parseEnvFile(path string) map[string]string {
 	}
 
 	result := make(map[string]string)
-	re := regexp.MustCompile(`^export\s+(\w+)=["'](.+?)["']\s*$`)
+	re := regexp.MustCompile(`^export\s+(\w+)=(.*)$`)
 
 	for _, line := range strings.Split(string(data), "\n") {
 		matches := re.FindStringSubmatch(strings.TrimSpace(line))
-		if len(matches) == 3 {
-			result[matches[1]] = matches[2]
+		if len(matches) != 3 {
+			continue
 		}
+		key := matches[1]
+		val := strings.TrimSpace(matches[2])
+		// 去掉首尾配对的单/双引号（env_file 无需支持转义）
+		if len(val) >= 2 {
+			first, last := val[0], val[len(val)-1]
+			if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+				val = val[1 : len(val)-1]
+			}
+		}
+		result[key] = val
 	}
 
 	return result
