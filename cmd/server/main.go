@@ -101,6 +101,15 @@ func main() {
 		log.Println("WeChat integration enabled")
 	}
 
+	// 飞书集成（官方 SDK 长连接，内置）
+	if config.Feishu.Enabled {
+		feishuMgr := server.NewFeishuManager(hub, auth, config.Feishu)
+		handler.SetFeishuManager(feishuMgr)
+		go feishuMgr.Start()
+		defer feishuMgr.Stop()
+		log.Println("Feishu integration enabled")
+	}
+
 	// 构建信息 API
 	http.HandleFunc("/api/build-info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

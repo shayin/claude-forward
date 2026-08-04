@@ -13,6 +13,7 @@ type Config struct {
 	Session  SessionConfig  `yaml:"session"`
 	Logging  LoggingConfig  `yaml:"logging"`
 	WeChat   WeChatConfig   `yaml:"wechat"`
+	Feishu   FeishuConfig   `yaml:"feishu"`
 }
 
 // ServerConfig 服务器基础配置
@@ -77,6 +78,9 @@ func DefaultConfig() *Config {
 		WeChat: WeChatConfig{
 			DataDir: "wechat-data",
 		},
+		Feishu: FeishuConfig{
+			DataDir: "feishu-data",
+		},
 	}
 }
 
@@ -107,4 +111,20 @@ type UserRoute struct {
 	WechatID   string `yaml:"wechat_id"`
 	ClawbotID  string `yaml:"clawbot_id"`
 	PushSecret string `yaml:"push_secret"`
+}
+
+// FeishuConfig 飞书集成配置
+type FeishuConfig struct {
+	Enabled   bool              `yaml:"enabled"`
+	AppID     string            `yaml:"app_id"`
+	AppSecret string            `yaml:"app_secret"`
+	DataDir   string            `yaml:"data_dir"`
+	Users     []FeishuUserRoute `yaml:"users"`
+}
+
+// FeishuUserRoute 飞书用户(open_id) → 电脑 clawbot_id 路由
+type FeishuUserRoute struct {
+	FeishuID   string `yaml:"feishu_id"`   // 飞书用户 open_id（白名单）
+	ClawbotID  string `yaml:"clawbot_id"`  // 电脑级别 ID，对应 Client 的 clawbot_id
+	PushSecret string `yaml:"push_secret"` // Push API 密钥（预留，飞书后台推送走 BackgroundResult 链路）
 }

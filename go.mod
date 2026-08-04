@@ -10,6 +10,8 @@ require (
 )
 
 require (
+	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/larksuite/oapi-sdk-go/v3 v3.9.10 // indirect
 	github.com/mdp/qrterminal/v3 v3.2.1 // indirect
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect

@@ -36,6 +36,7 @@ type Handler struct {
 	auth          *Auth
 	encryptionKey []byte         // 应用层加密密钥（nil 表示不加密）
 	wechatMgr     *WeChatManager // 微信管理器（可选，用于后台任务推送）
+	feishuMgr     *FeishuManager // 飞书管理器（可选，用于后台任务推送）
 	bgPushedMu    sync.Mutex
 	bgPushed      map[string]int64 // taskID → 推送时间(UnixMilli)，LRU 去重防断线堆积重连洪泛
 	bgPushedPath  string           // 已推送任务 ID 的持久化状态，跨服务端重启去重
@@ -64,6 +65,11 @@ func (h *Handler) SetWeChatManager(mgr *WeChatManager) {
 	h.bgPushedPath = filepath.Join(mgr.dataDir, backgroundPushesStateFile)
 	h.loadBackgroundPushesLocked(time.Now())
 	h.bgPushedMu.Unlock()
+}
+
+// SetFeishuManager 设置飞书管理器
+func (h *Handler) SetFeishuManager(mgr *FeishuManager) {
+	h.feishuMgr = mgr
 }
 
 func (h *Handler) loadBackgroundPushesLocked(now time.Time) {
@@ -515,8 +521,8 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 	log.Printf("[BG] Received background result: taskID=%s wechatID=%s isError=%v textLen=%d",
 		payload.TaskID, payload.WechatID, payload.IsError, len(payload.FullText))
 
-	if h.wechatMgr == nil {
-		log.Printf("[BG] No WeChatManager, cannot push result")
+	if h.wechatMgr == nil && h.feishuMgr == nil {
+		log.Printf("[BG] No chat manager (wechat/feishu), cannot push result")
 		return
 	}
 
@@ -554,7 +560,7 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 		text = "（后台任务完成，无文本输出）"
 	}
 
-	_, err := h.wechatMgr.PushMessage(payload.WechatID, text)
+	err := h.pushBackgroundToChannel(payload.WechatID, text)
 	if err != nil {
 		h.bgPushedMu.Lock()
 		delete(h.bgPushed, payload.TaskID)
@@ -567,6 +573,29 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 		log.Printf("[BG] Background result pushed: taskID=%s wechatID=%s", payload.TaskID, payload.WechatID)
 		ack()
 	}
+}
+
+// pushBackgroundToChannel 后台结果按渠道分发：先微信，未命中（ID 不在配置）再飞书。
+// 微信链路 WechatID 为微信 user_id；飞书链路 WechatID 复用为 open_id（不在微信配置，自然 fallback 到飞书）。
+func (h *Handler) pushBackgroundToChannel(userID, text string) error {
+	if h.wechatMgr != nil {
+		if _, err := h.wechatMgr.PushMessage(userID, text); err == nil {
+			return nil
+		} else if h.feishuMgr != nil {
+			if _, err2 := h.feishuMgr.PushMessage(userID, text); err2 == nil {
+				return nil
+			} else {
+				return err2
+			}
+		} else {
+			return err
+		}
+	}
+	if h.feishuMgr != nil {
+		_, err := h.feishuMgr.PushMessage(userID, text)
+		return err
+	}
+	return fmt.Errorf("no chat manager available")
 }
 
 // handleKillSession 处理销毁会话请求

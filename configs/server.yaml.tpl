@@ -39,3 +39,15 @@ wechat:
     # - wechat_id: "wxid_xxx@im.wechat"  # 微信用户 ID（首次从日志获取）
     #   clawbot_id: "my-macbook"          # 电脑级别 ID，对应 Client 的 clawbot_id
     #   push_secret: "your-push-secret"   # Push API 密钥（留空则该用户不允许推送）
+
+# 飞书集成（官方 SDK 长连接模式，server 主动连飞书，无需公网回调入口）
+# 前置：飞书开发者后台创建自建应用 → 开启机器人能力 → 事件订阅选「长连接模式」
+#       → 订阅 im.message.receive_v1 → 权限 im:message / im:message.receive → 发布过审
+feishu:
+  enabled: false
+  app_id: "cli_xxx"                       # 自建应用 App ID
+  app_secret: "xxx"                       # 自建应用 App Secret
+  data_dir: "feishu-data"                 # 数据存储目录（bindings）
+  users:                                  # 飞书用户白名单路由（open_id → clawbot_id）
+    # - feishu_id: "ou_xxx"               # 飞书用户 open_id（开发者后台或日志获取）
+    #   clawbot_id: "server"              # 电脑级别 ID，对应服务器 Client 的 clawbot_id
