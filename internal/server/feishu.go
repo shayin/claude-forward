@@ -545,10 +545,15 @@ func (m *FeishuManager) PushMessage(openID, text string) (string, error) {
 
 // --- 飞书 API ---
 
-// sendText 发送消息（interactive 卡片：普通段落走 markdown 元素，GFM 表格走 table 元素）
+// sendText 发送消息（schema 2.0 卡片：markdown 组件原生支持 标题/引用/表格/代码 等；1.0 不支持）
 func (m *FeishuManager) sendText(openID, text string) error {
 	card := map[string]any{
-		"elements": buildCardElements(text),
+		"schema": "2.0",
+		"body": map[string]any{
+			"elements": []map[string]any{
+				{"tag": "markdown", "content": text},
+			},
+		},
 	}
 	content, _ := json.Marshal(card)
 	req := larkim.NewCreateMessageReqBuilder().
