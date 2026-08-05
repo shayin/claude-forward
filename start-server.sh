@@ -139,6 +139,13 @@ auto_upgrade() {
     # 静默模式，不输出颜色
     print_info "检查更新..."
 
+    # 存活检测：server 未运行则自动拉起（用现有 bin，不 build）
+    # 解决 server 崩溃/被误杀时 auto-upgrade 只看 git 更新、不拉起的问题
+    if ! is_running; then
+        print_warn "server 未运行，自动拉起..."
+        start
+    fi
+
     # 获取当前 commit
     local current_commit=$(git rev-parse HEAD 2>/dev/null)
     if [ -z "$current_commit" ]; then
