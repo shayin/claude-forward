@@ -48,6 +48,10 @@ feishu:
   app_id: "cli_xxx"                       # 自建应用 App ID
   app_secret: "xxx"                       # 自建应用 App Secret
   data_dir: "feishu-data"                 # 数据存储目录（bindings）
+  # 收到消息时立即打的 emoji reaction（处理完成后删除）。
+  # 候选值：OnIt(👍)、Typing(⌨️)、Keyboard(⌨️)、Coffee(☕)、Hammer(🔨)、Rocket(🚀)、THINKING(🤔)
+  # 留空则用 THINKING。
+  pending_reaction: "Keyboard"
   users:                                  # 飞书用户白名单路由（open_id → clawbot_id）
     # - feishu_id: "ou_xxx"               # 飞书用户 open_id（开发者后台或日志获取）
     #   clawbot_id: "server"              # 电脑级别 ID，对应服务器 Client 的 clawbot_id
