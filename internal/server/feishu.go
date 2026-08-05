@@ -545,14 +545,19 @@ func (m *FeishuManager) PushMessage(openID, text string) (string, error) {
 
 // --- 飞书 API ---
 
-// sendText 发送文本消息
+// sendText 发送消息（用 interactive 卡片 + markdown 元素渲染；飞书 text 消息不渲染 md）
 func (m *FeishuManager) sendText(openID, text string) error {
-	content, _ := json.Marshal(map[string]string{"text": text})
+	card := map[string]any{
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": text},
+		},
+	}
+	content, _ := json.Marshal(card)
 	req := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType("open_id").
 		Body(&larkim.CreateMessageReqBody{
 			ReceiveId: larkcore.StringPtr(openID),
-			MsgType:   larkcore.StringPtr(larkim.MsgTypeText),
+			MsgType:   larkcore.StringPtr(larkim.MsgTypeInteractive),
 			Content:   larkcore.StringPtr(string(content)),
 		}).
 		Build()
