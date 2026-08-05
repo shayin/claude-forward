@@ -23,9 +23,10 @@ import (
 
 // feishuIncomingMessage 串行队列条目（保证同一用户消息按发送序处理）
 type feishuIncomingMessage struct {
-	route  *FeishuUserRoute
-	openID string
-	text   string
+	route     *FeishuUserRoute
+	openID    string
+	messageID string // 飞书消息 ID（用于添加/删除 emoji reaction）
+	text      string
 }
 
 // FeishuManager 飞书接入管理器
@@ -158,6 +159,9 @@ func (m *FeishuManager) enqueueMessage(e *larkim.P2MessageReceiveV1) {
 	}
 
 	incoming := &feishuIncomingMessage{route: route, openID: openID, text: text}
+	if msg.MessageId != nil {
+		incoming.messageID = *msg.MessageId
+	}
 	select {
 	case m.msgQueue <- incoming:
 	default:
@@ -173,7 +177,7 @@ func (m *FeishuManager) processLoop() {
 			if !ok {
 				return
 			}
-			m.handleMessage(msg.route, msg.openID, msg.text)
+			m.handleMessage(msg.route, msg.openID, msg.messageID, msg.text)
 		case <-m.ctx.Done():
 			return
 		}
@@ -181,7 +185,7 @@ func (m *FeishuManager) processLoop() {
 }
 
 // handleMessage 处理一条飞书消息
-func (m *FeishuManager) handleMessage(route *FeishuUserRoute, openID, text string) {
+func (m *FeishuManager) handleMessage(route *FeishuUserRoute, openID, messageID, text string) {
 	log.Printf("[FEISHU] 收到消息 [from=%s]: %s", openID, truncateStr(text, 80))
 
 	sendReply := func(replyText string) {
@@ -189,6 +193,25 @@ func (m *FeishuManager) handleMessage(route *FeishuUserRoute, openID, text strin
 			log.Printf("[FEISHU] 发送失败 [to=%s]: %v", openID, err)
 		}
 	}
+
+	// 立即给用户消息加 ⌛ reaction（"已收到，正在处理"）
+	// 拿到 reaction_id 后,在 defer 里删掉。
+	var pendingReactionID string
+	if messageID != "" {
+		if rid, err := m.addReaction(messageID, "THINKING"); err != nil {
+			log.Printf("[FEISHU] 加 reaction 失败: %v", err)
+		} else {
+			pendingReactionID = rid
+			log.Printf("[FEISHU] reaction 已添加 [reaction_id=%s]", rid)
+		}
+	}
+	defer func() {
+		if pendingReactionID != "" && messageID != "" {
+			if err := m.deleteReaction(messageID, pendingReactionID); err != nil {
+				log.Printf("[FEISHU] 删 reaction 失败: %v", err)
+			}
+		}
+	}()
 
 	// 处理指令（/provider、/engine、/model 透传给 client，由 client 端处理）
 	if strings.HasPrefix(text, "/") && !strings.HasPrefix(text, "/provider") && !strings.HasPrefix(text, "/engine") && !strings.HasPrefix(text, "/model") {
@@ -578,6 +601,35 @@ func (m *FeishuManager) sendText(openID, text string) error {
 }
 
 // --- bindings 持久化 ---
+
+// addReaction 给指定消息添加 emoji reaction,返回 reaction_id
+// emojiType 飞书表情枚举值,如 "THINKING"(思考中 ⌛)、"OK"、"DONE"、"THUMBSUP" 等
+func (m *FeishuManager) addReaction(messageID, emojiType string) (string, error) {
+	resp, err := m.apiClient.Im.MessageReaction.Create(context.Background(),
+		larkim.NewCreateMessageReactionReqBuilder().
+			MessageId(messageID).
+			Body(larkim.NewCreateMessageReactionReqBodyBuilder().
+				ReactionType(larkim.NewEmojiBuilder().EmojiType(emojiType).Build()).
+				Build()).
+			Build())
+	if err != nil {
+		return "", err
+	}
+	if resp.Data == nil || resp.Data.ReactionId == nil {
+		return "", fmt.Errorf("addReaction: response missing reaction_id")
+	}
+	return *resp.Data.ReactionId, nil
+}
+
+// deleteReaction 删除指定消息的 emoji reaction
+func (m *FeishuManager) deleteReaction(messageID, reactionID string) error {
+	_, err := m.apiClient.Im.MessageReaction.Delete(context.Background(),
+		larkim.NewDeleteMessageReactionReqBuilder().
+			MessageId(messageID).
+			ReactionId(reactionID).
+			Build())
+	return err
+}
 
 func (m *FeishuManager) getBinding(openID string) string {
 	m.mu.Lock()
