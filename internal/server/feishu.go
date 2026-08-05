@@ -545,12 +545,10 @@ func (m *FeishuManager) PushMessage(openID, text string) (string, error) {
 
 // --- 飞书 API ---
 
-// sendText 发送消息（用 interactive 卡片 + markdown 元素渲染；飞书 text 消息不渲染 md）
+// sendText 发送消息（interactive 卡片：普通段落走 markdown 元素，GFM 表格走 table 元素）
 func (m *FeishuManager) sendText(openID, text string) error {
 	card := map[string]any{
-		"elements": []map[string]any{
-			{"tag": "markdown", "content": text},
-		},
+		"elements": buildCardElements(text),
 	}
 	content, _ := json.Marshal(card)
 	req := larkim.NewCreateMessageReqBuilder().
@@ -572,6 +570,110 @@ func (m *FeishuManager) sendText(openID, text string) error {
 		return fmt.Errorf("feishu create message failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	return nil
+}
+
+// buildCardElements 把 markdown 文本拆成飞书卡片元素序列：普通段落 → markdown 元素，GFM 表格 → table 元素。
+// 飞书卡片 markdown 元素不支持表格语法，表格需用专用 table 组件渲染。
+func buildCardElements(text string) []map[string]any {
+	lines := strings.Split(text, "\n")
+	var elements []map[string]any
+	var buf []string
+
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
+		joined := strings.TrimSpace(strings.Join(buf, "\n"))
+		if joined != "" {
+			elements = append(elements, map[string]any{"tag": "markdown", "content": joined})
+		}
+		buf = nil
+	}
+
+	i := 0
+	for i < len(lines) {
+		if isTableRow(lines[i]) && i+1 < len(lines) && isTableSeparator(lines[i+1]) {
+			flush()
+			headers := parseTableRow(lines[i])
+			columns := make([]map[string]any, 0, len(headers))
+			for k, h := range headers {
+				columns = append(columns, map[string]any{
+					"name":         fmt.Sprintf("c%d", k),
+					"display_name": strings.TrimSpace(h),
+					"data_type":    "text",
+				})
+			}
+			var rows []map[string]string
+			j := i + 2
+			for j < len(lines) && isTableRow(lines[j]) {
+				cells := parseTableRow(lines[j])
+				row := map[string]string{}
+				for k := range headers {
+					if k < len(cells) {
+						row[fmt.Sprintf("c%d", k)] = cells[k]
+					}
+				}
+				rows = append(rows, row)
+				j++
+			}
+			elements = append(elements, map[string]any{
+				"tag":        "table",
+				"page_size":  20,
+				"row_height": "low",
+				"header_style": map[string]any{
+					"text_align":       "left",
+					"text_size":        "normal",
+					"background_style": "grey",
+					"bold":             true,
+					"text_color":       "default",
+				},
+				"columns": columns,
+				"rows":    rows,
+			})
+			i = j
+			continue
+		}
+		buf = append(buf, lines[i])
+		i++
+	}
+	flush()
+
+	if len(elements) == 0 {
+		elements = append(elements, map[string]any{"tag": "markdown", "content": text})
+	}
+	return elements
+}
+
+// isTableRow 判断一行是否像表格数据行（去掉首尾空白后以 | 开头）
+func isTableRow(line string) bool {
+	t := strings.TrimSpace(line)
+	return t != "" && strings.HasPrefix(t, "|")
+}
+
+// isTableSeparator 判断是否是表格分隔行（如 |---|:--:|---|）：只含 - : | 空白 且至少含 -
+func isTableSeparator(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" || !strings.ContainsRune(t, '-') {
+		return false
+	}
+	for _, ch := range t {
+		if ch != '-' && ch != ':' && ch != '|' && ch != ' ' && ch != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+// parseTableRow 把 "| a | b |" 解析成 ["a","b"]
+func parseTableRow(line string) []string {
+	t := strings.TrimSpace(line)
+	t = strings.TrimPrefix(t, "|")
+	t = strings.TrimSuffix(t, "|")
+	parts := strings.Split(t, "|")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
 }
 
 // --- bindings 持久化 ---
