@@ -58,3 +58,9 @@ wechat-bridge
 # WeChat runtime data (push queue, etc.)
 wechat-data/
 internal/server/wechat-data/
+
+# 运行时数据（不入库）
+feishu-data/
+wechat-data/
+sessions.json
+configs/wechat-session.json
