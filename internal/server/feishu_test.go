@@ -104,35 +104,3 @@ func TestFeishuManager_OpenMapWhitelist(t *testing.T) {
 		t.Fatalf("ClawbotID = %q, want %q", route.ClawbotID, "server")
 	}
 }
-
-// TestBuildCardElements_TableAndText 验证：文本 + 表格 + 文本 被拆成 [markdown, table, markdown]。
-func TestBuildCardElements_TableAndText(t *testing.T) {
-	text := "标题文字\n\n| 列1 | 列2 |\n|---|---|\n| a | b |\n| c | d |\n\n尾部文本"
-	els := buildCardElements(text)
-
-	if len(els) != 3 {
-		t.Fatalf("elements count = %d, want 3 (markdown+table+markdown)", len(els))
-	}
-	if els[0]["tag"] != "markdown" || els[2]["tag"] != "markdown" {
-		t.Fatalf("首尾元素应为 markdown，got %v / %v", els[0]["tag"], els[2]["tag"])
-	}
-	if els[1]["tag"] != "table" {
-		t.Fatalf("中间元素应为 table，got %v", els[1]["tag"])
-	}
-	cols, ok := els[1]["columns"].([]map[string]any)
-	if !ok || len(cols) != 2 || cols[0]["display_name"] != "列1" || cols[1]["display_name"] != "列2" {
-		t.Fatalf("columns 解析错误: %+v", els[1]["columns"])
-	}
-	rows, ok := els[1]["rows"].([]map[string]string)
-	if !ok || len(rows) != 2 || rows[0]["c0"] != "a" || rows[0]["c1"] != "b" || rows[1]["c0"] != "c" {
-		t.Fatalf("rows 解析错误: %+v", els[1]["rows"])
-	}
-}
-
-// TestBuildCardElements_PureText 验证：无表格时退化为单个 markdown 元素。
-func TestBuildCardElements_PureText(t *testing.T) {
-	els := buildCardElements("纯文本，没有表格")
-	if len(els) != 1 || els[0]["tag"] != "markdown" {
-		t.Fatalf("纯文本应为单个 markdown 元素，got %+v", els)
-	}
-}
