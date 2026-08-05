@@ -115,12 +115,11 @@ type UserRoute struct {
 
 // FeishuConfig 飞书集成配置
 type FeishuConfig struct {
-	Enabled         bool              `yaml:"enabled"`
-	AppID           string            `yaml:"app_id"`
-	AppSecret       string            `yaml:"app_secret"`
-	DataDir         string            `yaml:"data_dir"`
-	PendingReaction string            `yaml:"pending_reaction"` // 收到消息时加的 emoji reaction (默认 THINKING)
-	Users           []FeishuUserRoute `yaml:"users"`
+	Enabled   bool              `yaml:"enabled"`
+	AppID     string            `yaml:"app_id"`
+	AppSecret string            `yaml:"app_secret"`
+	DataDir   string            `yaml:"data_dir"`
+	Users     []FeishuUserRoute `yaml:"users"`
 }
 
 // FeishuUserRoute 飞书用户(open_id) → 电脑 clawbot_id 路由

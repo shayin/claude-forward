@@ -196,17 +196,13 @@ func (m *FeishuManager) handleMessage(route *FeishuUserRoute, openID, messageID,
 
 	// 立即给用户消息加 ⌛ reaction（"已收到，正在处理"）
 	// 拿到 reaction_id 后,在 defer 里删掉。
-	emojiType := m.config.PendingReaction
-	if emojiType == "" {
-		emojiType = "THINKING"
-	}
 	var pendingReactionID string
 	if messageID != "" {
-		if rid, err := m.addReaction(messageID, emojiType); err != nil {
-			log.Printf("[FEISHU] 加 reaction 失败 [type=%s]: %v", emojiType, err)
+		if rid, err := m.addReaction(messageID, "THINKING"); err != nil {
+			log.Printf("[FEISHU] 加 reaction 失败: %v", err)
 		} else {
 			pendingReactionID = rid
-			log.Printf("[FEISHU] reaction 已添加 [type=%s reaction_id=%s]", emojiType, rid)
+			log.Printf("[FEISHU] reaction 已添加 [reaction_id=%s]", rid)
 		}
 	}
 	defer func() {
