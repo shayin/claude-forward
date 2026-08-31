@@ -1,6 +1,10 @@
 package server
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestFeishuChatResponseCollectText_PrefersFinalResult(t *testing.T) {
 	r := &feishuChatResponse{}
@@ -102,5 +106,104 @@ func TestFeishuManager_OpenMapWhitelist(t *testing.T) {
 	}
 	if route := m.openMap["ou_allowed"]; route.ClawbotID != "server" {
 		t.Fatalf("ClawbotID = %q, want %q", route.ClawbotID, "server")
+	}
+}
+
+// TestLoadConfig_MergesSingleFeishuIntoApps 验证单条 feishu（向后兼容）合并进 feishu_apps 列表头部。
+func TestLoadConfig_MergesSingleFeishuIntoApps(t *testing.T) {
+	yamlContent := `
+feishu:
+  enabled: true
+  app_id: "cli_single"
+  app_secret: "secret-single"
+  users:
+    - feishu_id: "ou_a"
+      clawbot_id: "server"
+
+feishu_apps:
+  - enabled: true
+    app_id: "cli_txy"
+    app_secret: "secret-txy"
+    data_dir: "feishu-data-txy"
+    users:
+      - feishu_id: "ou_b"
+        clawbot_id: "txy"
+  - enabled: false
+    app_id: "cli_disabled"
+    app_secret: "secret-off"
+`
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	if err := os.WriteFile(path, []byte(yamlContent), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+
+	if len(cfg.FeishuApps) != 3 {
+		t.Fatalf("FeishuApps len = %d, want 3 (单条 + 2 条列表)", len(cfg.FeishuApps))
+	}
+	// 单条配置必须排首位（保持原有 app 先初始化的行为可预期）
+	if cfg.FeishuApps[0].AppID != "cli_single" {
+		t.Errorf("FeishuApps[0].AppID = %q, want %q", cfg.FeishuApps[0].AppID, "cli_single")
+	}
+	if cfg.FeishuApps[1].AppID != "cli_txy" || cfg.FeishuApps[1].DataDir != "feishu-data-txy" {
+		t.Errorf("FeishuApps[1] = %+v, want cli_txy + feishu-data-txy", cfg.FeishuApps[1])
+	}
+	if cfg.FeishuApps[1].Users[0].ClawbotID != "txy" {
+		t.Errorf("FeishuApps[1].Users[0].ClawbotID = %q, want %q", cfg.FeishuApps[1].Users[0].ClawbotID, "txy")
+	}
+}
+
+// TestLoadConfig_DisabledSingleFeishuNotMerged 验证单条 feishu 未启用时不混入列表。
+func TestLoadConfig_DisabledSingleFeishuNotMerged(t *testing.T) {
+	yamlContent := `
+feishu:
+  enabled: false
+  app_id: "cli_single"
+
+feishu_apps:
+  - enabled: true
+    app_id: "cli_txy"
+    app_secret: "secret-txy"
+`
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	if err := os.WriteFile(path, []byte(yamlContent), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig error: %v", err)
+	}
+
+	if len(cfg.FeishuApps) != 1 {
+		t.Fatalf("FeishuApps len = %d, want 1", len(cfg.FeishuApps))
+	}
+	if cfg.FeishuApps[0].AppID != "cli_txy" {
+		t.Errorf("FeishuApps[0].AppID = %q, want %q", cfg.FeishuApps[0].AppID, "cli_txy")
+	}
+}
+
+// TestAddFeishuManager 验证多管理器注册与 nil 忽略。
+func TestAddFeishuManager(t *testing.T) {
+	h := NewHandler(NewHub(), nil, nil)
+	if len(h.feishuMgrs) != 0 {
+		t.Fatalf("初始 feishuMgrs len = %d, want 0", len(h.feishuMgrs))
+	}
+
+	h.AddFeishuManager(nil)
+	if len(h.feishuMgrs) != 0 {
+		t.Fatalf("nil 注册后 feishuMgrs len = %d, want 0", len(h.feishuMgrs))
+	}
+
+	m1 := NewFeishuManager(nil, nil, FeishuConfig{Enabled: true, AppID: "cli_1"})
+	m2 := NewFeishuManager(nil, nil, FeishuConfig{Enabled: true, AppID: "cli_2"})
+	h.AddFeishuManager(m1)
+	h.AddFeishuManager(m2)
+	if len(h.feishuMgrs) != 2 {
+		t.Fatalf("feishuMgrs len = %d, want 2", len(h.feishuMgrs))
 	}
 }

@@ -352,3 +352,35 @@ func TestSetWeChatManager(t *testing.T) {
 		t.Error("wechatMgr not set correctly")
 	}
 }
+
+// TestPushBackgroundToChannel_TriesAllFeishuManagers 验证多飞书应用时逐个尝试：
+// 所有应用都不认识该 open_id 才报错（不同应用 open_id 不同，白名单外不触网络）。
+func TestPushBackgroundToChannel_TriesAllFeishuManagers(t *testing.T) {
+	handler := NewHandler(NewHub(), nil, nil)
+
+	mgr1 := &FeishuManager{
+		openMap:  map[string]*FeishuUserRoute{},
+		bindings: make(map[string]string),
+	}
+	mgr2 := &FeishuManager{
+		openMap:  map[string]*FeishuUserRoute{},
+		bindings: make(map[string]string),
+	}
+	handler.AddFeishuManager(mgr1)
+	handler.AddFeishuManager(mgr2)
+
+	err := handler.pushBackgroundToChannel("ou_unknown", "hello")
+	if err == nil {
+		t.Fatal("expected error when no manager knows the open_id, got nil")
+	}
+}
+
+// TestPushBackgroundToChannel_NoManager 验证无任何渠道时报 no chat manager available。
+func TestPushBackgroundToChannel_NoManager(t *testing.T) {
+	handler := NewHandler(NewHub(), nil, nil)
+
+	err := handler.pushBackgroundToChannel("ou_anyone", "hello")
+	if err == nil || err.Error() != "no chat manager available" {
+		t.Fatalf("err = %v, want no chat manager available", err)
+	}
+}

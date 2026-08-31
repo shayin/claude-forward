@@ -101,13 +101,16 @@ func main() {
 		log.Println("WeChat integration enabled")
 	}
 
-	// 飞书集成（官方 SDK 长连接，内置）
-	if config.Feishu.Enabled {
-		feishuMgr := server.NewFeishuManager(hub, auth, config.Feishu)
-		handler.SetFeishuManager(feishuMgr)
+	// 飞书集成（官方 SDK 长连接，内置；支持多应用，每个 app 一个独立机器人）
+	for i, app := range config.FeishuApps {
+		if !app.Enabled {
+			continue
+		}
+		feishuMgr := server.NewFeishuManager(hub, auth, app)
+		handler.AddFeishuManager(feishuMgr)
 		go feishuMgr.Start()
 		defer feishuMgr.Stop()
-		log.Println("Feishu integration enabled")
+		log.Printf("Feishu integration enabled (app %d: %s, data_dir=%s)", i+1, app.AppID, app.DataDir)
 	}
 
 	// 构建信息 API

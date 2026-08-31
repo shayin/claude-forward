@@ -14,6 +14,8 @@ type Config struct {
 	Logging  LoggingConfig  `yaml:"logging"`
 	WeChat   WeChatConfig   `yaml:"wechat"`
 	Feishu   FeishuConfig   `yaml:"feishu"`
+	// FeishuApps 多飞书应用列表（每个 app 独立机器人，路由到不同 clawbot）
+	FeishuApps []FeishuConfig `yaml:"feishu_apps"`
 }
 
 // ServerConfig 服务器基础配置
@@ -96,7 +98,21 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// 单条 feishu（向后兼容）合并进 feishu_apps 统一处理
+	config.FeishuApps = mergeFeishuApps(config.Feishu, config.FeishuApps)
+
 	return config, nil
+}
+
+// mergeFeishuApps 把单条 feishu 配置插入 apps 列表头部，返回合并后的列表
+func mergeFeishuApps(single FeishuConfig, apps []FeishuConfig) []FeishuConfig {
+	if !single.Enabled {
+		return apps
+	}
+	merged := make([]FeishuConfig, 0, len(apps)+1)
+	merged = append(merged, single)
+	merged = append(merged, apps...)
+	return merged
 }
 
 // WeChatConfig 微信集成配置

@@ -34,9 +34,9 @@ const (
 type Handler struct {
 	hub           *Hub
 	auth          *Auth
-	encryptionKey []byte         // 应用层加密密钥（nil 表示不加密）
-	wechatMgr     *WeChatManager // 微信管理器（可选，用于后台任务推送）
-	feishuMgr     *FeishuManager // 飞书管理器（可选，用于后台任务推送）
+	encryptionKey []byte           // 应用层加密密钥（nil 表示不加密）
+	wechatMgr     *WeChatManager   // 微信管理器（可选，用于后台任务推送）
+	feishuMgrs    []*FeishuManager // 飞书管理器列表（多应用，每个 app 一个，用于后台任务推送）
 	bgPushedMu    sync.Mutex
 	bgPushed      map[string]int64 // taskID → 推送时间(UnixMilli)，LRU 去重防断线堆积重连洪泛
 	bgPushedPath  string           // 已推送任务 ID 的持久化状态，跨服务端重启去重
@@ -67,9 +67,12 @@ func (h *Handler) SetWeChatManager(mgr *WeChatManager) {
 	h.bgPushedMu.Unlock()
 }
 
-// SetFeishuManager 设置飞书管理器
-func (h *Handler) SetFeishuManager(mgr *FeishuManager) {
-	h.feishuMgr = mgr
+// AddFeishuManager 添加飞书管理器（多应用场景可多次调用）
+func (h *Handler) AddFeishuManager(mgr *FeishuManager) {
+	if mgr == nil {
+		return
+	}
+	h.feishuMgrs = append(h.feishuMgrs, mgr)
 }
 
 func (h *Handler) loadBackgroundPushesLocked(now time.Time) {
@@ -521,7 +524,7 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 	log.Printf("[BG] Received background result: taskID=%s wechatID=%s isError=%v textLen=%d",
 		payload.TaskID, payload.WechatID, payload.IsError, len(payload.FullText))
 
-	if h.wechatMgr == nil && h.feishuMgr == nil {
+	if h.wechatMgr == nil && len(h.feishuMgrs) == 0 {
 		log.Printf("[BG] No chat manager (wechat/feishu), cannot push result")
 		return
 	}
@@ -575,25 +578,28 @@ func (h *Handler) handleBackgroundResult(conn *Connection, msg *protocol.Message
 	}
 }
 
-// pushBackgroundToChannel 后台结果按渠道分发：先微信，未命中（ID 不在配置）再飞书。
-// 微信链路 WechatID 为微信 user_id；飞书链路 WechatID 复用为 open_id（不在微信配置，自然 fallback 到飞书）。
+// pushBackgroundToChannel 后台结果按渠道分发：先微信，未命中（ID 不在配置）再逐个飞书应用尝试。
+// 微信链路 WechatID 为微信 user_id；飞书链路 WechatID 复用为 open_id。
+// 不同飞书应用下同一用户的 open_id 不同，只有持有该 open_id 白名单的应用能推送成功。
 func (h *Handler) pushBackgroundToChannel(userID, text string) error {
+	var wechatErr error
 	if h.wechatMgr != nil {
 		if _, err := h.wechatMgr.PushMessage(userID, text); err == nil {
 			return nil
-		} else if h.feishuMgr != nil {
-			if _, err2 := h.feishuMgr.PushMessage(userID, text); err2 == nil {
-				return nil
-			} else {
-				return err2
-			}
 		} else {
-			return err
+			wechatErr = err
 		}
 	}
-	if h.feishuMgr != nil {
-		_, err := h.feishuMgr.PushMessage(userID, text)
-		return err
+	var lastErr error = wechatErr
+	for _, mgr := range h.feishuMgrs {
+		if _, err := mgr.PushMessage(userID, text); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return lastErr
 	}
 	return fmt.Errorf("no chat manager available")
 }
