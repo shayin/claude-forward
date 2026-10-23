@@ -8,13 +8,13 @@ server:
   reconnect_interval: 5               # 断线重连间隔（秒）
   encryption_key: ""                  # 应用层加密密钥（留空不加密，需与服务器一致，建议 32+ 字符随机字符串）
 
-# 终端模式配置（用于 tmux 终端转发，聊天模式不需要）
+# 旧版 tmux 终端转发配置（聊天模式不需要）
 tmux:
   session_name: ""                    # tmux session 名称，留空自动从项目目录推导
   auto_start: true                    # 是否自动创建 tmux session
   shell: ""                           # 默认 shell，留空使用系统默认
 
-# 云桥终端（独立于聊天及旧 tmux，默认关闭）
+# 终端模式（cmux，独立于聊天及旧 tmux，默认关闭）
 # 仅连接当前用户的 cmux socket；若 cmux 拒绝外部进程连接，应在获授权的
 # 运行环境中启动 CF Client，不要通过放宽 cmux 权限来绕过限制。
 cmux:

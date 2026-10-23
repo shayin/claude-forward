@@ -33,9 +33,17 @@ test("legacy client selection and independent cmux entry coexist without interpr
   assert.equal(list.children[0].children[1].children[0].textContent, hostile);
   assert.equal(list.children[0].children.length, 3); // 旧 Client 不显示新入口
   assert.equal(list.children[1].children.length, 4);
+  assert.equal(list.children[1].children[3].textContent, "终端模式");
   list.children[0].handlers.click();
   let stopped = false;
   list.children[1].children[3].handlers.click({ stopPropagation: () => { stopped = true; } });
   assert.deepEqual(actions, [["attach", hostile], ["cmux", 1]]);
   assert.equal(stopped, true);
+});
+
+test("cmux page title and header use terminal mode name", () => {
+  const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
+  assert.match(html, /<title>Claude Forward · 终端模式<\/title>/);
+  assert.match(html, /<strong>Claude Forward · 终端模式<\/strong>/);
+  assert.doesNotMatch(html, /云桥终端/);
 });
