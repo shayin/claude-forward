@@ -99,5 +99,8 @@ export function renderGrid(grid) {
   } else {
     content += "\x1b[?25l";
   }
-  return { content, columns, rows: height, alternateScreen };
+  return { content, columns, rows: height, alternateScreen, screenLines: alternateScreen ? lines : null,
+    cursor: cursor && Number.isInteger(cursor.row) && Number.isInteger(cursor.column) &&
+      cursor.row >= 0 && cursor.row < height && cursor.column >= 0 && cursor.column < columns
+      ? { row: cursor.row, column: cursor.column } : null };
 }

@@ -253,6 +253,82 @@ func TestCmuxManagerMutationsUseConstrainedSocketMethods(t *testing.T) {
 		if call.Method == "mobile.terminal.mouse" && (call.Params.Column == nil || call.Params.Row == nil) {
 			t.Fatal("zero mouse coordinate must be serialized")
 		}
+		if call.Method == "mobile.terminal.scroll" {
+			replay := <-calls
+			if replay.Method != "terminal.replay" || replay.Params.SurfaceID != "s" {
+				t.Fatalf("scroll replay target wrong: %+v", replay)
+			}
+		}
+	}
+}
+
+func TestCmuxScrollReturnsReplayWithoutSecondWebRoundTrip(t *testing.T) {
+	calls := make(chan string, 2)
+	socket := fakeCmuxSocket(t, func(request cmuxRPCRequest) string {
+		calls <- request.Method
+		if request.Method == "terminal.replay" {
+			return `{"ok":true,"result":{"render_grid":{"active_screen":"alternate"}}}`
+		}
+		return `{"ok":true,"result":{"scrolled":true}}`
+	})
+	manager := NewCmuxManager(CmuxConfig{Enabled: true, SocketPath: socket})
+	result, err := manager.Execute(context.Background(), protocol.CmuxRequestPayload{
+		RequestID: "scroll-replay", Action: protocol.CmuxScroll,
+		WorkspaceID: "w", SurfaceID: "s", DeltaLines: -3,
+	})
+	if err != nil || string(result) != `{"render_grid":{"active_screen":"alternate"}}` {
+		t.Fatalf("scroll should return fresh replay: result=%s err=%v", result, err)
+	}
+	if first, second := <-calls, <-calls; first != "mobile.terminal.scroll" || second != "terminal.replay" {
+		t.Fatalf("unexpected RPC order: %s then %s", first, second)
+	}
+}
+
+func TestCmuxScrollReplayFailureDoesNotRetryTheScroll(t *testing.T) {
+	calls := make(chan string, 2)
+	socket := fakeCmuxSocket(t, func(request cmuxRPCRequest) string {
+		calls <- request.Method
+		if request.Method == "terminal.replay" {
+			return `{"ok":false,"error":{"code":"unavailable","message":"not ready"}}`
+		}
+		return `{"ok":true,"result":{"scrolled":true}}`
+	})
+	manager := NewCmuxManager(CmuxConfig{Enabled: true, SocketPath: socket})
+	result, err := manager.Execute(context.Background(), protocol.CmuxRequestPayload{
+		RequestID: "scroll-fallback", Action: protocol.CmuxScroll,
+		WorkspaceID: "w", SurfaceID: "s", DeltaLines: 2,
+	})
+	if err != nil || string(result) != `{"scrolled":true}` {
+		t.Fatalf("successful scroll must not be reported as failed: result=%s err=%v", result, err)
+	}
+	if first, second := <-calls, <-calls; first != "mobile.terminal.scroll" || second != "terminal.replay" {
+		t.Fatalf("scroll must run exactly once: %s then %s", first, second)
+	}
+}
+
+func TestCmuxScrollSlowReplayFallsBackWithoutRepeatingInput(t *testing.T) {
+	calls := make(chan string, 2)
+	socket := fakeCmuxSocket(t, func(request cmuxRPCRequest) string {
+		calls <- request.Method
+		if request.Method == "terminal.replay" {
+			time.Sleep(900 * time.Millisecond)
+		}
+		return `{"ok":true,"result":{"scrolled":true}}`
+	})
+	manager := NewCmuxManager(CmuxConfig{Enabled: true, SocketPath: socket})
+	started := time.Now()
+	result, err := manager.Execute(context.Background(), protocol.CmuxRequestPayload{
+		RequestID: "scroll-slow-replay", Action: protocol.CmuxScroll,
+		WorkspaceID: "w", SurfaceID: "s", DeltaLines: 2,
+	})
+	if err != nil || string(result) != `{"scrolled":true}` {
+		t.Fatalf("slow replay must retain scroll success: result=%s err=%v", result, err)
+	}
+	if time.Since(started) >= 1500*time.Millisecond {
+		t.Fatal("slow replay blocked the scroll response too long")
+	}
+	if first, second := <-calls, <-calls; first != "mobile.terminal.scroll" || second != "terminal.replay" {
+		t.Fatalf("scroll must run exactly once: %s then %s", first, second)
 	}
 }
 

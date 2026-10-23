@@ -11,6 +11,7 @@ function fixture(send = () => Promise.resolve()) {
   let writable = false;
   const remote = [];
   const errors = [];
+  let activities = 0;
   let resumed = 0;
   let scrollListener = () => {};
   const buffer = { baseY: 100, viewportY: 100 };
@@ -31,6 +32,7 @@ function fixture(send = () => Promise.resolve()) {
     element, terminal, isSelected: () => selected, canRemoteScroll: () => writable,
     sendRemoteScroll: lines => { remote.push(lines); return send(lines); },
     onRemoteError: error => errors.push(error),
+    onRemoteActivity: () => { activities++; },
     onReturnToBottom: () => { resumed++; },
     raf: callback => { callbacks.set(++frameID, callback); return frameID; },
     cancelRaf: id => callbacks.delete(id),
@@ -57,7 +59,8 @@ function fixture(send = () => Promise.resolve()) {
     setTime(value) { clock = value; },
     setWritable(value) { writable = value; },
     setSelected(value) { selected = value; },
-    get resumed() { return resumed; }
+    get resumed() { return resumed; },
+    get activities() { return activities; }
   };
 }
 
@@ -212,5 +215,29 @@ test("输入权丢失后不补发旧位移，恢复后只处理新手势", async
   await Promise.resolve();
   assert.deepEqual(f.remote, [-8, -1]);
   resolve();
+  await Promise.resolve();
+});
+
+test("全屏松手后短暂惯性合并远程位移，再次触摸或失权即停止", async () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.touch("touchstart", 100);
+  f.setTime(20);
+  f.touch("touchmove", 140);
+  f.touch("touchend", 140);
+  const before = f.activities;
+  f.flush(36);
+  assert.ok(f.activities > before);
+  f.touch("touchstart", 140);
+  const stopped = f.activities;
+  f.flush(52);
+  assert.equal(f.activities, stopped);
+  f.setTime(60);
+  f.touch("touchmove", 180);
+  f.touch("touchend", 180);
+  f.setWritable(false);
+  f.flush(76);
+  assert.equal(f.activities, stopped + 1);
   await Promise.resolve();
 });

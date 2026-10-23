@@ -1,7 +1,7 @@
 // 普通屏历史只在浏览器中滚动；全屏 TUI 的滚轮输入才交给本机 cmux。
 export function mountCmuxScroll({
   element, terminal, isSelected, canRemoteScroll, sendRemoteScroll, onRemoteError,
-  onReturnToBottom,
+  onReturnToBottom, onRemoteActivity = () => {},
   raf = requestAnimationFrame, cancelRaf = cancelAnimationFrame, now = performance.now.bind(performance)
 }) {
   let alternateScreen = false;
@@ -59,6 +59,7 @@ export function mountCmuxScroll({
   };
   const queueRemote = pixels => {
     if (!alternateScreen || !canRemoteScroll() || !Number.isFinite(pixels)) return;
+    onRemoteActivity();
     if (remotePixels * pixels < 0) remotePixels = 0;
     remotePixels = Math.max(-32 * lineHeight(), Math.min(32 * lineHeight(), remotePixels + pixels));
     const lines = Math.trunc(remotePixels / lineHeight());
@@ -154,7 +155,29 @@ export function mountCmuxScroll({
       cancelRaf(dragFrame);
       paintLine();
     }
-    if (alternateScreen || !dragging || Math.abs(velocity) < .12) {
+    if (alternateScreen) {
+      touching = false;
+      if (!dragging || Math.abs(velocity) < .12) return;
+      // 与普通屏一样保留短暂惯性；只合并位移，不为每帧发一个 RPC。
+      let previous = now();
+      let speed = velocity;
+      const started = previous;
+      const glideRemote = time => {
+        const elapsed = Math.min(32, Math.max(1, time - previous));
+        previous = time;
+        speed *= Math.exp(-elapsed / 140);
+        if (!alternateScreen || !canRemoteScroll() || Math.abs(speed) < .12 ||
+            time - started > 400) {
+          momentumFrame = 0;
+          return;
+        }
+        queueRemote(speed * elapsed);
+        momentumFrame = raf(glideRemote);
+      };
+      momentumFrame = raf(glideRemote);
+      return;
+    }
+    if (!dragging || Math.abs(velocity) < .12) {
       finishLocal();
       return;
     }

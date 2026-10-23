@@ -1,4 +1,7 @@
 import { renderGrid } from "./cmux-render.mjs";
+import { alternateFramePatch } from "./cmux-frame-update.mjs";
+import { createCmuxActivePoll } from "./cmux-active-poll.mjs";
+import { createCmuxFrameOrder } from "./cmux-frame-order.mjs";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
   visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
@@ -91,6 +94,8 @@ let sessionEpoch = 0;
 let snapshotInFlight = null;
 let snapshotAfterFlight = false;
 let lastFrame = "";
+let lastGridFrame = null;
+const frameOrder = createCmuxFrameOrder();
 let stopped = false;
 let pointerStart = null;
 let viewportTimer;
@@ -114,13 +119,22 @@ const scrollController = mountCmuxScroll({
   canRemoteScroll: () => Boolean(inputOwned && selectedSurface && !terminalPane.hidden),
   sendRemoteScroll: async lines => {
     const client = activeClient, workspace = selectedWorkspace, surface = selectedSurface;
-    await request("scroll", { workspace_id: workspace, surface_id: surface, delta_lines: lines });
-    if (client === activeClient && workspace === selectedWorkspace && surface === selectedSurface) {
-      void refreshSnapshot(true);
+    const epoch = sessionEpoch, sequence = frameOrder.issue();
+    const result = await request("scroll", {
+      workspace_id: workspace, surface_id: surface, delta_lines: lines
+    });
+    if (client === activeClient && workspace === selectedWorkspace &&
+        surface === selectedSurface && epoch === sessionEpoch) {
+      if (result?.render_grid) applySnapshot(result, workspace, surface, epoch, sequence);
+      else void refreshSnapshot(true);
     }
   },
   onRemoteError: error => showStatus(`终端滚动失败：${error.message}`),
+  onRemoteActivity: () => activePoll.activate(),
   onReturnToBottom: () => void refreshSnapshot(true)
+});
+const activePoll = createCmuxActivePoll(() => {
+  if (document.visibilityState === "visible" && !terminalPane.hidden) void refreshSnapshot();
 });
 const fileView = mountCmuxFiles({
   request,
@@ -128,6 +142,7 @@ const fileView = mountCmuxFiles({
   canUpload: () => adminOwned,
   onShow: () => {
     browserView.hide(false);
+    activePoll.stop();
     scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
@@ -140,6 +155,7 @@ const browserView = mountCmuxBrowser({
   canManage: () => adminOwned,
   onShow: () => {
     fileView.reset();
+    activePoll.stop();
     scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
@@ -251,6 +267,7 @@ async function reportViewport() {
 new ResizeObserver(() => scheduleViewport()).observe(terminalElement);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
+    activePoll.stop();
     releaseInput(selectedSurface);
     releaseAdmin();
     setInputState(false);
@@ -392,6 +409,7 @@ function renderClients(clientList) {
 
 function attach() {
   if (!selectedClient) return;
+  activePoll.stop();
   scrollController.reset();
   fileView.reset();
   browserView.reset();
@@ -424,6 +442,7 @@ function attach() {
   snapshotInFlight = null;
   snapshotAfterFlight = false;
   lastFrame = "";
+  lastGridFrame = null;
   workspacesElement.replaceChildren();
   notificationsElement.replaceChildren();
   tabs.replaceChildren();
@@ -619,6 +638,7 @@ function selectWorkspace(id) {
   const workspace = workspaces.find(item => item.id === id);
   if (!workspace) return;
   drawer.close();
+  activePoll.stop();
   scrollController.reset();
   saveDraft();
   const previousSelectedSurface = selectedSurface;
@@ -644,6 +664,7 @@ function selectWorkspace(id) {
   updateProgramStatus();
   terminal.reset();
   lastFrame = "";
+  lastGridFrame = null;
   renderWorkspaces();
   renderTabs(workspace);
   void refreshSnapshot();
@@ -659,6 +680,7 @@ function renderTabs(workspace) {
     button.classList.toggle("active", surface.id === selectedSurface);
     button.addEventListener("click", () => {
       saveDraft();
+      activePoll.stop();
       scrollController.reset();
       const oldSurface = selectedSurface;
       selectedSurface = surface.id;
@@ -675,6 +697,7 @@ function renderTabs(workspace) {
       updateProgramStatus();
       terminal.reset();
       lastFrame = "";
+      lastGridFrame = null;
       renderTabs(workspace);
       void refreshSnapshot();
     });
@@ -734,6 +757,7 @@ async function refreshWorkspaces() {
       title.textContent = "cmux 中没有可用的终端工作区";
       terminal.reset();
       lastFrame = "";
+      lastGridFrame = null;
     }
   }
   if (statusIndicator.dataset.state !== "ready") {
@@ -753,36 +777,10 @@ async function refreshSnapshot(urgent = false) {
   }
   const flight = { surface, epoch };
   snapshotInFlight = flight;
+  const sequence = frameOrder.issue();
   try {
     const result = await request("snapshot", { workspace_id: workspace, surface_id: surface });
-    if (surface !== selectedSurface || workspace !== selectedWorkspace || epoch !== sessionEpoch) return;
-    if (scrollController.holdFrame()) return;
-    if (result?.render_grid) {
-      const frame = renderGrid(result.render_grid);
-      scrollController.setAlternateScreen(frame.alternateScreen);
-      if (frame.content === lastFrame) return;
-      // replay 是完整帧，不是增量输出。清空旧帧避免轮询将历史反复写入滚动缓冲。
-      const scrollOffset = terminal.buffer.active.baseY - terminal.buffer.active.viewportY;
-      if (terminal.cols !== frame.columns || terminal.rows !== frame.rows) {
-        terminal.resize(frame.columns, frame.rows);
-      }
-      if (terminal.hasSelection()) return;
-      lastFrame = frame.content;
-      terminal.reset();
-      terminal.write(`\x1b[3J${frame.content}`, () => {
-        if (scrollOffset > 0) terminal.scrollLines(-scrollOffset);
-      });
-    } else {
-      scrollController.setAlternateScreen(false);
-      const plain = typeof result === "string" ? result : result?.text;
-      const text = String(plain || "终端尚未就绪")
-        .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
-      if (text !== lastFrame) {
-        lastFrame = text;
-        terminal.reset();
-        terminal.write(text);
-      }
-    }
+    applySnapshot(result, workspace, surface, epoch, sequence);
   } catch (error) {
     showStatus(error.message);
   } finally {
@@ -792,6 +790,46 @@ async function refreshSnapshot(urgent = false) {
         snapshotAfterFlight = false;
         if (!scrollController.holdFrame()) void refreshSnapshot();
       }
+    }
+  }
+}
+
+function applySnapshot(result, workspace, surface, epoch, sequence) {
+  if (surface !== selectedSurface || workspace !== selectedWorkspace ||
+      epoch !== sessionEpoch || scrollController.holdFrame() ||
+      !frameOrder.accept(sequence)) return;
+  if (result?.render_grid) {
+    const frame = renderGrid(result.render_grid);
+    scrollController.setAlternateScreen(frame.alternateScreen);
+    if (frame.content === lastFrame) return;
+    const scrollOffset = terminal.buffer.active.baseY - terminal.buffer.active.viewportY;
+    const sizeChanged = terminal.cols !== frame.columns || terminal.rows !== frame.rows;
+    if (sizeChanged) {
+      terminal.resize(frame.columns, frame.rows);
+    }
+    if (terminal.hasSelection()) return;
+    const patch = sizeChanged ? null : alternateFramePatch(lastGridFrame, frame);
+    lastFrame = frame.content;
+    lastGridFrame = frame;
+    if (patch !== null) {
+      if (patch) terminal.write(patch);
+    } else {
+      // 主屏的历史缓冲与初始全屏帧仍需完整重建；全屏后续帧只更新变化行。
+      terminal.reset();
+      terminal.write(`\x1b[3J${frame.content}`, () => {
+        if (scrollOffset > 0 && !frame.alternateScreen) terminal.scrollLines(-scrollOffset);
+      });
+    }
+  } else {
+    scrollController.setAlternateScreen(false);
+    lastGridFrame = null;
+    const plain = typeof result === "string" ? result : result?.text;
+    const text = String(plain || "终端尚未就绪")
+      .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+    if (text !== lastFrame) {
+      lastFrame = text;
+      terminal.reset();
+      terminal.write(text);
     }
   }
 }
@@ -923,6 +961,7 @@ function connect() {
         setInputState(false);
         setAdminState(false);
         browserView.reset();
+        activePoll.stop();
         sessionEpoch += 1;
         clearPending("Client 已离线");
         connectionState("unavailable", "Client 已离线，等待重新连接");
@@ -951,6 +990,7 @@ function connect() {
     setInputState(false);
     setAdminState(false);
     browserView.reset();
+    activePoll.stop();
     sessionEpoch += 1;
     connectionState("connecting", "连接中断，正在重连…");
     clearInterval(clientDiscoveryTimer);
@@ -1106,6 +1146,7 @@ if (xtermTextarea) bindMobileTerminalTextInput({
 });
 
 window.addEventListener("pagehide", () => {
+  activePoll.stop();
   scrollController.reset();
   releaseInput(selectedSurface);
   releaseAdmin();
