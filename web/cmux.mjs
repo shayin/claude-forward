@@ -2,7 +2,7 @@ import { renderGrid } from "./cmux-render.mjs";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
   visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
-import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput, wheelLines } from "./cmux-input.mjs";
+import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs";
 import { viewportDimensions, viewportReportKey } from "./cmux-viewport.mjs";
 import { mountCmuxFiles } from "./cmux-file-view.mjs";
 import { mountCmuxBrowser } from "./cmux-browser.mjs";
@@ -12,6 +12,7 @@ import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
+import { mountCmuxScroll } from "./cmux-scroll.mjs";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -88,6 +89,7 @@ let inputOwned = false;
 let adminOwned = false;
 let sessionEpoch = 0;
 let snapshotInFlight = null;
+let snapshotAfterFlight = false;
 let lastFrame = "";
 let stopped = false;
 let pointerStart = null;
@@ -105,12 +107,28 @@ const terminalFiles = document.getElementById("terminalFiles");
 const uploadAttachmentsButton = document.getElementById("uploadAttachmentsButton");
 const attachmentPreview = document.getElementById("attachmentPreview");
 let attachmentPreviewURLs = [];
+const scrollController = mountCmuxScroll({
+  element: terminalElement,
+  terminal,
+  isSelected: () => Boolean(selectedSurface && !terminalPane.hidden),
+  canRemoteScroll: () => Boolean(inputOwned && selectedSurface && !terminalPane.hidden),
+  sendRemoteScroll: async lines => {
+    const client = activeClient, workspace = selectedWorkspace, surface = selectedSurface;
+    await request("scroll", { workspace_id: workspace, surface_id: surface, delta_lines: lines });
+    if (client === activeClient && workspace === selectedWorkspace && surface === selectedSurface) {
+      void refreshSnapshot(true);
+    }
+  },
+  onRemoteError: error => showStatus(`终端滚动失败：${error.message}`),
+  onReturnToBottom: () => void refreshSnapshot(true)
+});
 const fileView = mountCmuxFiles({
   request,
   currentClient: () => activeClient,
   canUpload: () => adminOwned,
   onShow: () => {
     browserView.hide(false);
+    scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
   onHide: () => { claimInput(); scheduleViewport(); }
@@ -122,6 +140,7 @@ const browserView = mountCmuxBrowser({
   canManage: () => adminOwned,
   onShow: () => {
     fileView.reset();
+    scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
   onHide: () => { claimInput(); scheduleViewport(); }
@@ -131,6 +150,7 @@ function setInputState(owned, occupied = false) {
   const wasOwned = inputOwned;
   inputOwned = owned && Boolean(activeClient && selectedSurface);
   if (!inputOwned) {
+    scrollController.cancelRemote();
     clearTimeout(viewportTimer);
     lastViewportKey = "";
     setAttachmentOpen(false);
@@ -372,6 +392,7 @@ function renderClients(clientList) {
 
 function attach() {
   if (!selectedClient) return;
+  scrollController.reset();
   fileView.reset();
   browserView.reset();
   clearAttachmentPreview();
@@ -401,6 +422,7 @@ function attach() {
   groups = [];
   programs.clear();
   snapshotInFlight = null;
+  snapshotAfterFlight = false;
   lastFrame = "";
   workspacesElement.replaceChildren();
   notificationsElement.replaceChildren();
@@ -597,6 +619,7 @@ function selectWorkspace(id) {
   const workspace = workspaces.find(item => item.id === id);
   if (!workspace) return;
   drawer.close();
+  scrollController.reset();
   saveDraft();
   const previousSelectedSurface = selectedSurface;
   const previousSurface = selectedWorkspace === id ? selectedSurface :
@@ -636,6 +659,7 @@ function renderTabs(workspace) {
     button.classList.toggle("active", surface.id === selectedSurface);
     button.addEventListener("click", () => {
       saveDraft();
+      scrollController.reset();
       const oldSurface = selectedSurface;
       selectedSurface = surface.id;
       if (oldSurface !== selectedSurface) {
@@ -717,19 +741,25 @@ async function refreshWorkspaces() {
   }
 }
 
-async function refreshSnapshot() {
+async function refreshSnapshot(urgent = false) {
   if (!selectedSurface || !activeClient) return;
+  if (scrollController.holdFrame()) return;
   const surface = selectedSurface;
   const workspace = selectedWorkspace;
   const epoch = sessionEpoch;
-  if (snapshotInFlight?.surface === surface && snapshotInFlight.epoch === epoch) return;
+  if (snapshotInFlight?.surface === surface && snapshotInFlight.epoch === epoch) {
+    if (urgent) snapshotAfterFlight = true;
+    return;
+  }
   const flight = { surface, epoch };
   snapshotInFlight = flight;
   try {
     const result = await request("snapshot", { workspace_id: workspace, surface_id: surface });
     if (surface !== selectedSurface || workspace !== selectedWorkspace || epoch !== sessionEpoch) return;
+    if (scrollController.holdFrame()) return;
     if (result?.render_grid) {
       const frame = renderGrid(result.render_grid);
+      scrollController.setAlternateScreen(frame.alternateScreen);
       if (frame.content === lastFrame) return;
       // replay 是完整帧，不是增量输出。清空旧帧避免轮询将历史反复写入滚动缓冲。
       const scrollOffset = terminal.buffer.active.baseY - terminal.buffer.active.viewportY;
@@ -743,6 +773,7 @@ async function refreshSnapshot() {
         if (scrollOffset > 0) terminal.scrollLines(-scrollOffset);
       });
     } else {
+      scrollController.setAlternateScreen(false);
       const plain = typeof result === "string" ? result : result?.text;
       const text = String(plain || "终端尚未就绪")
         .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
@@ -755,7 +786,13 @@ async function refreshSnapshot() {
   } catch (error) {
     showStatus(error.message);
   } finally {
-    if (snapshotInFlight === flight) snapshotInFlight = null;
+    if (snapshotInFlight === flight) {
+      snapshotInFlight = null;
+      if (snapshotAfterFlight) {
+        snapshotAfterFlight = false;
+        if (!scrollController.holdFrame()) void refreshSnapshot();
+      }
+    }
   }
 }
 
@@ -1047,13 +1084,7 @@ terminalElement.addEventListener("pointerup", event => {
   if (!inputOwned || !start || start.pointerId !== event.pointerId || start.surface !== selectedSurface ||
       start.workspace !== selectedWorkspace) return;
   const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-  if (start.pointerType === "touch" && distance > 12) {
-    const delta = wheelLines(start.y - event.clientY, 0, 18);
-    if (delta) void request("scroll", {
-      workspace_id: start.workspace, surface_id: start.surface, delta_lines: delta
-    }).then(() => refreshSnapshot()).catch(error => showStatus(error.message));
-    return;
-  }
+  if (start.pointerType === "touch" && distance > 12) return;
   if (distance > 5 || terminal.hasSelection()) return;
   const screen = terminalElement.querySelector(".xterm-screen");
   const position = screenCoordinates(event.clientX, event.clientY,
@@ -1062,16 +1093,6 @@ terminalElement.addEventListener("pointerup", event => {
     workspace_id: start.workspace, surface_id: start.surface, ...position
   }).then(() => refreshSnapshot()).catch(error => showStatus(error.message));
 });
-terminalElement.addEventListener("wheel", event => {
-  if (!selectedSurface || !inputOwned || event.altKey) return; // Alt+滚轮只回看浏览器内历史
-  event.preventDefault();
-  const delta = wheelLines(event.deltaY, event.deltaMode,
-    terminalElement.querySelector(".xterm-screen")?.clientHeight / terminal.rows || 18);
-  if (delta) void request("scroll", {
-    workspace_id: selectedWorkspace, surface_id: selectedSurface, delta_lines: delta
-  }).then(() => refreshSnapshot()).catch(error => showStatus(error.message));
-}, { passive: false, capture: true });
-
 const xtermTextarea = terminalElement.querySelector(".xterm-helper-textarea");
 if (xtermTextarea) bindMobileTerminalTextInput({
   textarea: xtermTextarea,
@@ -1085,6 +1106,7 @@ if (xtermTextarea) bindMobileTerminalTextInput({
 });
 
 window.addEventListener("pagehide", () => {
+  scrollController.reset();
   releaseInput(selectedSurface);
   releaseAdmin();
   stopped = true;
