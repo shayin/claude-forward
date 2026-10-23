@@ -2,6 +2,7 @@ import { renderGrid } from "./cmux-render.mjs";
 import { alternateFramePatch } from "./cmux-frame-update.mjs";
 import { createCmuxActivePoll } from "./cmux-active-poll.mjs";
 import { createCmuxFrameOrder } from "./cmux-frame-order.mjs";
+import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
   visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
@@ -264,7 +265,12 @@ async function reportViewport() {
   }
 }
 
-new ResizeObserver(() => scheduleViewport()).observe(terminalElement);
+new ResizeObserver(() => {
+  scheduleViewport();
+  if (lastGridFrame?.alternateScreen && !scrollController.holdFrame()) {
+    showLatestScreen(terminalElement);
+  }
+}).observe(terminalElement);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     activePoll.stop();
@@ -801,8 +807,11 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
   if (result?.render_grid) {
     const frame = renderGrid(result.render_grid);
     scrollController.setAlternateScreen(frame.alternateScreen);
-    if (frame.content === lastFrame) return;
+    if (frame.content === lastFrame && terminal.cols === frame.columns &&
+        terminal.rows === frame.rows) return;
     const scrollOffset = terminal.buffer.active.baseY - terminal.buffer.active.viewportY;
+    const followLatest = shouldFollowLatest(terminalElement, frame.alternateScreen,
+      scrollController.isBrowsing());
     const sizeChanged = terminal.cols !== frame.columns || terminal.rows !== frame.rows;
     if (sizeChanged) {
       terminal.resize(frame.columns, frame.rows);
@@ -811,13 +820,23 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     const patch = sizeChanged ? null : alternateFramePatch(lastGridFrame, frame);
     lastFrame = frame.content;
     lastGridFrame = frame;
+    const showLatestIfCurrent = () => {
+      if (frame.alternateScreen && surface === selectedSurface &&
+          workspace === selectedWorkspace && epoch === sessionEpoch &&
+          lastGridFrame === frame && !scrollController.holdFrame()) {
+        showLatestScreen(terminalElement);
+      }
+    };
     if (patch !== null) {
-      if (patch) terminal.write(patch);
+      if (patch) terminal.write(patch, () => {
+        if (followLatest) showLatestIfCurrent();
+      });
     } else {
       // 主屏的历史缓冲与初始全屏帧仍需完整重建；全屏后续帧只更新变化行。
       terminal.reset();
       terminal.write(`\x1b[3J${frame.content}`, () => {
         if (scrollOffset > 0 && !frame.alternateScreen) terminal.scrollLines(-scrollOffset);
+        showLatestIfCurrent();
       });
     }
   } else {

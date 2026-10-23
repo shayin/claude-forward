@@ -1,4 +1,4 @@
-// 普通屏历史只在浏览器中滚动；全屏 TUI 的滚轮输入才交给本机 cmux。
+// 手机触摸只浏览已收到的画面；桌面滚轮仍可将全屏 TUI 的滚动输入交给 cmux。
 export function mountCmuxScroll({
   element, terminal, isSelected, canRemoteScroll, sendRemoteScroll, onRemoteError,
   onReturnToBottom, onRemoteActivity = () => {},
@@ -27,8 +27,10 @@ export function mountCmuxScroll({
   const lineHeight = () => Math.max(1,
     (element.querySelector(".xterm-screen")?.getBoundingClientRect().height || 0) /
     Math.max(1, terminal.rows) || 18);
-  const atBottom = () => buffer().viewportY >= buffer().baseY;
-  const holdFrame = () => !alternateScreen && (browsing || touching || momentumFrame !== 0);
+  const atBottom = () => alternateScreen
+    ? element.scrollTop >= element.scrollHeight - element.clientHeight - 1
+    : buffer().viewportY >= buffer().baseY;
+  const holdFrame = () => browsing || touching || momentumFrame !== 0;
   const finishLocal = () => {
     touching = false;
     dragging = false;
@@ -43,8 +45,12 @@ export function mountCmuxScroll({
   };
   const paintLine = () => {
     dragFrame = 0;
-    const target = Math.max(0, Math.min(buffer().baseY, pendingLine));
-    terminal.scrollToLine(target);
+    if (alternateScreen) {
+      element.scrollTop = pendingLine;
+    } else {
+      const target = Math.max(0, Math.min(buffer().baseY, pendingLine));
+      terminal.scrollToLine(target);
+    }
     if (!atBottom()) browsing = true;
   };
   const scheduleLine = line => {
@@ -111,24 +117,18 @@ export function mountCmuxScroll({
   };
   element.addEventListener("touchstart", event => {
     if (!isSelected() || event.touches.length !== 1) return;
-    if (alternateScreen && !canRemoteScroll()) return;
     cancelMotion();
+    if (alternateScreen) cancelRemote();
     touching = true;
     dragging = false;
     const touch = event.touches[0];
     startY = lastY = touch.clientY;
-    startLine = buffer().viewportY;
+    startLine = alternateScreen ? element.scrollTop : buffer().viewportY;
     lastAt = now();
     velocity = 0;
   }, { capture: true, passive: true });
   element.addEventListener("touchmove", event => {
     if (!touching || event.touches.length !== 1) return;
-    if (alternateScreen && !canRemoteScroll()) {
-      touching = false;
-      dragging = false;
-      cancelRemote();
-      return;
-    }
     const touch = event.touches[0];
     const distance = touch.clientY - startY;
     if (!dragging && Math.abs(distance) < 4) return;
@@ -139,7 +139,7 @@ export function mountCmuxScroll({
     const elapsed = Math.max(1, time - lastAt);
     velocity = Math.max(-2.5, Math.min(2.5, (lastY - touch.clientY) / elapsed));
     if (alternateScreen) {
-      queueRemote(lastY - touch.clientY);
+      scheduleLine(startLine - distance);
     } else {
       scheduleLine(startLine - distance / lineHeight());
     }
@@ -155,28 +155,6 @@ export function mountCmuxScroll({
       cancelRaf(dragFrame);
       paintLine();
     }
-    if (alternateScreen) {
-      touching = false;
-      if (!dragging || Math.abs(velocity) < .12) return;
-      // 与普通屏一样保留短暂惯性；只合并位移，不为每帧发一个 RPC。
-      let previous = now();
-      let speed = velocity;
-      const started = previous;
-      const glideRemote = time => {
-        const elapsed = Math.min(32, Math.max(1, time - previous));
-        previous = time;
-        speed *= Math.exp(-elapsed / 140);
-        if (!alternateScreen || !canRemoteScroll() || Math.abs(speed) < .12 ||
-            time - started > 400) {
-          momentumFrame = 0;
-          return;
-        }
-        queueRemote(speed * elapsed);
-        momentumFrame = raf(glideRemote);
-      };
-      momentumFrame = raf(glideRemote);
-      return;
-    }
     if (!dragging || Math.abs(velocity) < .12) {
       finishLocal();
       return;
@@ -191,11 +169,15 @@ export function mountCmuxScroll({
         finishLocal();
         return;
       }
-      const before = buffer().viewportY;
-      terminal.scrollToLine(Math.max(0, Math.min(buffer().baseY,
-        Math.round(before + velocity * elapsed / lineHeight()))));
+      const before = alternateScreen ? element.scrollTop : buffer().viewportY;
+      if (alternateScreen) {
+        element.scrollTop = before + velocity * elapsed;
+      } else {
+        terminal.scrollToLine(Math.max(0, Math.min(buffer().baseY,
+          Math.round(before + velocity * elapsed / lineHeight()))));
+      }
       if (!atBottom()) browsing = true;
-      if (buffer().viewportY === before) {
+      if ((alternateScreen ? element.scrollTop : buffer().viewportY) === before) {
         momentumFrame = 0;
         finishLocal();
       } else {
@@ -206,17 +188,21 @@ export function mountCmuxScroll({
   }, { capture: true, passive: false });
   element.addEventListener("touchcancel", () => {
     cancelMotion();
-    remoteLines = 0;
-    remotePixels = 0;
     finishLocal();
   }, { capture: true });
   element.addEventListener("wheel", event => {
     if (!isSelected() || !event.deltaY || event.altKey || event.ctrlKey || event.metaKey) return;
     if (alternateScreen) {
-      if (!canRemoteScroll()) return;
       const pixels = event.deltaMode === 1 ? event.deltaY * lineHeight() :
         event.deltaMode === 2 ? event.deltaY * lineHeight() * terminal.rows : event.deltaY;
-      queueRemote(pixels);
+      if (element.scrollHeight > element.clientHeight + 1) {
+        const wasBrowsing = browsing;
+        element.scrollTop += pixels;
+        browsing = !atBottom();
+        if (wasBrowsing && !browsing) onReturnToBottom();
+      } else if (canRemoteScroll()) {
+        queueRemote(pixels);
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       return;

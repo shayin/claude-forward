@@ -24,7 +24,13 @@ function fixture(send = () => Promise.resolve()) {
     },
     onScroll(fn) { scrollListener = fn; }
   };
+  let scrollTop = 370;
   const element = {
+    scrollHeight: 850, clientHeight: 480,
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value) {
+      scrollTop = Math.max(0, Math.min(this.scrollHeight - this.clientHeight, value));
+    },
     addEventListener(name, handler) { listeners.set(name, handler); },
     querySelector() { return { getBoundingClientRect: () => ({ height: 360 }) }; }
   };
@@ -55,7 +61,7 @@ function fixture(send = () => Promise.resolve()) {
     for (const callback of pending) callback(time);
   };
   return {
-    controller, buffer, terminal, remote, errors, listeners, touch, flush,
+    controller, buffer, terminal, element, remote, errors, listeners, touch, flush,
     setTime(value) { clock = value; },
     setWritable(value) { writable = value; },
     setSelected(value) { selected = value; },
@@ -113,26 +119,30 @@ test("轻点、切换终端、取消手势不会误触发滚动", () => {
   assert.equal(f.controller.holdFrame(), false);
 });
 
-test("全屏模式只有持有输入权才合并远程滚动，且不会冻结画面", async () => {
+test("全屏手机只滚动已收到的画面，失去输入权仍可阅读", () => {
   const f = fixture();
   f.controller.setAlternateScreen(true);
   f.touch("touchstart", 100);
-  f.setTime(20);
-  assert.equal(f.touch("touchmove", 220).prevented, false);
+  f.setTime(2000);
+  assert.equal(f.touch("touchmove", 220).prevented, true);
+  f.flush();
+  assert.equal(f.element.scrollTop, 250);
   f.touch("touchend", 220);
+  assert.equal(f.controller.holdFrame(), true);
   assert.deepEqual(f.remote, []);
   f.setWritable(true);
-  f.touch("touchstart", 100);
-  f.setTime(40);
-  f.touch("touchmove", 220);
-  f.touch("touchend", 220);
-  await Promise.resolve();
-  assert.deepEqual(f.remote, [-6]);
+  f.touch("touchstart", 220);
+  f.setTime(4000);
+  f.touch("touchmove", 50);
+  f.flush();
+  f.touch("touchend", 50);
+  assert.equal(f.element.scrollTop, 370);
   assert.equal(f.controller.holdFrame(), false);
-  assert.equal(f.buffer.viewportY, 100);
+  assert.equal(f.resumed, 1);
+  assert.deepEqual(f.remote, []);
 });
 
-test("正常滚轮交给 xterm，只有全屏模式才拦截并送远程", async () => {
+test("普通屏滚轮交给 xterm，全屏已有画面在本机滚动", async () => {
   const f = fixture();
   const wheel = deltaY => {
     let prevented = false;
@@ -150,9 +160,10 @@ test("正常滚轮交给 xterm，只有全屏模式才拦截并送远程", async
   assert.equal(f.resumed, 1);
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
-  assert.equal(wheel(54), true);
+  assert.equal(wheel(-54), true);
+  assert.equal(f.element.scrollTop, 316);
   await Promise.resolve();
-  assert.deepEqual(f.remote, [3]);
+  assert.deepEqual(f.remote, []);
 });
 
 test("松手后本地惯性继续滚动，再次触摸能取消旧手势", () => {
@@ -171,16 +182,18 @@ test("松手后本地惯性继续滚动，再次触摸能取消旧手势", () =>
   assert.equal(f.buffer.viewportY, stopped);
 });
 
-test("远程 RPC 未完成时合并后续位移，切换终端丢弃旧队列", async () => {
+test("无本地溢出时保留桌面滚轮远端队列，切换终端丢弃旧队列", async () => {
   let resolve;
   const f = fixture(() => new Promise(done => { resolve = done; }));
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
-  f.touch("touchstart", 100);
-  f.setTime(20);
-  f.touch("touchmove", 280);
-  f.setTime(40);
-  f.touch("touchmove", 350);
+  f.element.scrollHeight = f.element.clientHeight;
+  const wheel = deltaY => f.listeners.get("wheel")({
+    deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  wheel(-180);
+  wheel(-70);
   assert.deepEqual(f.remote, [-8]);
   resolve();
   await Promise.resolve();
@@ -192,24 +205,33 @@ test("远程 RPC 未完成时合并后续位移，切换终端丢弃旧队列", 
   assert.deepEqual(f.remote, [-8, -5]);
 });
 
-test("输入权丢失后不补发旧位移，恢复后只处理新手势", async () => {
+test("桌面滚轮失去输入权后不补发旧位移，手机触摸仍可本地查看", async () => {
   let resolve;
   const f = fixture(() => new Promise(done => { resolve = done; }));
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
-  f.touch("touchstart", 100);
-  f.setTime(20);
-  f.touch("touchmove", 280);
-  f.setTime(40);
-  f.touch("touchmove", 350);
+  f.element.scrollHeight = f.element.clientHeight;
+  const wheel = deltaY => f.listeners.get("wheel")({
+    deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  wheel(-180);
+  wheel(-70);
   assert.deepEqual(f.remote, [-8]);
   f.setWritable(false);
   f.controller.cancelRemote();
-  assert.equal(f.touch("touchmove", 370).prevented, false);
-  f.setWritable(true);
+  wheel(-70);
+  f.element.scrollHeight = 850;
+  f.element.scrollTop = 370;
   f.touch("touchstart", 100);
-  f.setTime(60);
-  f.touch("touchmove", 118);
+  f.setTime(2000);
+  assert.equal(f.touch("touchmove", 220).prevented, true);
+  f.flush();
+  assert.equal(f.element.scrollTop, 250);
+  f.touch("touchend", 220);
+  f.setWritable(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  wheel(-18);
   resolve();
   await Promise.resolve();
   await Promise.resolve();
@@ -218,26 +240,23 @@ test("输入权丢失后不补发旧位移，恢复后只处理新手势", async
   await Promise.resolve();
 });
 
-test("全屏松手后短暂惯性合并远程位移，再次触摸或失权即停止", async () => {
+test("全屏手机的惯性只移动本地画面，再次触摸停止旧惯性", () => {
   const f = fixture();
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
   f.touch("touchstart", 100);
   f.setTime(20);
   f.touch("touchmove", 140);
+  f.flush(20);
   f.touch("touchend", 140);
-  const before = f.activities;
+  const before = f.element.scrollTop;
   f.flush(36);
-  assert.ok(f.activities > before);
+  assert.ok(f.element.scrollTop < before);
   f.touch("touchstart", 140);
-  const stopped = f.activities;
+  const stopped = f.element.scrollTop;
   f.flush(52);
-  assert.equal(f.activities, stopped);
-  f.setTime(60);
-  f.touch("touchmove", 180);
-  f.touch("touchend", 180);
+  assert.equal(f.element.scrollTop, stopped);
   f.setWritable(false);
-  f.flush(76);
-  assert.equal(f.activities, stopped + 1);
-  await Promise.resolve();
+  assert.deepEqual(f.remote, []);
+  assert.equal(f.activities, 0);
 });
