@@ -10,10 +10,23 @@
 </head>
 <body>
   <header>
-    <a href="./" aria-label="返回原有聊天">← 原有聊天</a>
-    <button id="sidebarToggle" type="button" aria-controls="cmuxSidebar" aria-expanded="false">☰ 工作区</button>
+    <a class="back-link" href="./" aria-label="返回原有聊天">← 原有聊天</a>
+    <button id="sidebarToggle" type="button" aria-controls="cmuxSidebar" aria-expanded="false">
+      <span class="workspace-menu-icon">☰</span><span id="workspaceShortcut">工作区</span>
+    </button>
     <strong>Claude Forward · 终端模式</strong>
-    <span class="connection-status"><span id="statusIndicator" class="status-indicator" data-state="connecting" aria-hidden="true"></span><span id="status" role="status">连接中…</span></span>
+    <button id="connectionStatusButton" class="connection-status" type="button" aria-label="连接中">
+      <span id="statusIndicator" class="status-indicator" data-state="connecting" aria-hidden="true"></span>
+      <span id="status" role="status">连接中…</span>
+    </button>
+    <details id="mobileTools" class="mobile-tools">
+      <summary aria-label="更多操作">···</summary>
+      <div class="mobile-menu">
+        <button id="mobileFiles" type="button">文件</button>
+        <button id="mobileBrowser" type="button">网页预览</button>
+        <button id="mobileRefresh" type="button">刷新工作区</button>
+      </div>
+    </details>
   </header>
   <div id="sidebarScrim" hidden></div>
   <main>
@@ -50,7 +63,10 @@
         <span id="inputStatus">选择终端后检查输入权</span>
         <button id="takeoverButton" type="button" hidden>接管输入</button>
       </div>
-      <nav id="terminalTabs" aria-label="终端标签页"></nav>
+      <div class="tab-strip">
+        <nav id="terminalTabs" aria-label="终端标签页"></nav>
+        <button id="mobileNewTabButton" type="button" aria-label="新建终端 tab" title="新建终端 tab">+</button>
+      </div>
       <div class="tab-actions"><button id="newTabButton" type="button">新建终端 tab</button></div>
       <div id="terminal"></div>
       <div class="keys" aria-label="终端快捷键">
@@ -58,16 +74,25 @@
         <button type="button" data-key="ctrl+c">Ctrl+C</button>
         <button type="button" data-key="up">↑</button>
         <button type="button" data-key="down">↓</button>
-        <button type="button" data-key="left">←</button>
-        <button type="button" data-key="right">→</button>
+        <button type="button" data-key="left" class="desktop-key">←</button>
+        <button type="button" data-key="right" class="desktop-key">→</button>
         <button type="button" data-key="tab">Tab</button>
         <button type="button" data-key="return">Enter</button>
+        <details class="mobile-extra-keys">
+          <summary aria-label="更多终端按键">···</summary>
+          <div class="extra-key-panel">
+            <button type="button" data-key="left">←</button>
+            <button type="button" data-key="right">→</button>
+            <button type="button" data-key="tab" class="extra-tab">Tab</button>
+          </div>
+        </details>
       </div>
       <form id="promptForm">
-        <textarea id="prompt" placeholder="输入后发送到电脑上的真实终端" rows="2"></textarea>
+        <button id="attachmentToggle" type="button" aria-label="附件" aria-controls="terminalAttachments" aria-expanded="false">📎</button>
+        <textarea id="prompt" placeholder="发送到电脑终端" rows="2"></textarea>
         <button type="submit">发送</button>
       </form>
-      <div class="upload-controls">
+      <div id="terminalAttachments" class="upload-controls">
         <label>附件（最多 8 个，每个不超过 20 MiB）<input id="terminalFiles" type="file" multiple></label>
         <button id="uploadAttachmentsButton" type="button">上传到当前终端草稿</button>
         <div id="attachmentPreview" aria-live="polite"></div>

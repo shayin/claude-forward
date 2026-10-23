@@ -11,15 +11,23 @@ import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs";
 import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
+import { mountCmuxCompact } from "./cmux-compact.mjs";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
+const connectionStatusButton = document.getElementById("connectionStatusButton");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const workspaceShortcut = document.getElementById("workspaceShortcut");
 const clientsSelect = document.getElementById("clientSelect");
 const workspacesElement = document.getElementById("workspaces");
 const unreadOnlyElement = document.getElementById("unreadOnly");
 const nextUnreadButton = document.getElementById("nextUnreadButton");
 const title = document.getElementById("terminalTitle");
 const tabs = document.getElementById("terminalTabs");
+const terminalPane = document.getElementById("terminalPane");
+const attachmentToggle = document.getElementById("attachmentToggle");
+const mobileMedia = window.matchMedia("(max-width: 680px)");
+const promptSubmitButton = document.querySelector('#promptForm button[type="submit"]');
 const notificationsElement = document.getElementById("notifications");
 const prompt = document.getElementById("prompt");
 const inputStatus = document.getElementById("inputStatus");
@@ -28,11 +36,24 @@ const adminStatus = document.getElementById("adminStatus");
 const adminTakeoverButton = document.getElementById("adminTakeoverButton");
 const terminalElement = document.getElementById("terminal");
 const drawer = mountCmuxDrawer({
-  button: document.getElementById("sidebarToggle"),
+  button: sidebarToggle,
   aside: document.getElementById("cmuxSidebar"),
   backdrop: document.getElementById("sidebarScrim"),
   body: document.body,
-  media: window.matchMedia("(max-width: 680px)")
+  media: mobileMedia
+});
+const { syncPromptHeight, setAttachmentOpen, showStatus: presentStatus } = mountCmuxCompact({
+  media: mobileMedia,
+  statusButton: connectionStatusButton,
+  mobileTools: document.getElementById("mobileTools"),
+  extraKeys: document.querySelector(".mobile-extra-keys"),
+  attachmentToggle,
+  terminalPane,
+  prompt,
+  statusElement: status,
+  filesButton: document.getElementById("filesToggleButton"),
+  browserButton: document.getElementById("browserToggleButton"),
+  refreshButton: document.getElementById("refreshButton")
 });
 const terminal = new window.Terminal({
   cursorBlink: true, fontSize: 14, fontFamily: "Menlo, monospace", scrollback: 3000,
@@ -112,6 +133,7 @@ function setInputState(owned, occupied = false) {
   if (!inputOwned) {
     clearTimeout(viewportTimer);
     lastViewportKey = "";
+    setAttachmentOpen(false);
   } else if (!wasOwned) {
     scheduleViewport();
   }
@@ -119,8 +141,10 @@ function setInputState(owned, occupied = false) {
     inputOwned ? "此设备可输入" : occupied ? "另一设备正在输入 · 只读" : "等待获取输入权";
   takeoverButton.hidden = !selectedSurface || inputOwned || !activeClient;
   takeoverButton.textContent = occupied ? "接管输入" : "获取输入权";
+  terminalPane.classList.toggle("input-owned", inputOwned);
   prompt.disabled = !inputOwned;
-  document.querySelector("#promptForm button").disabled = !inputOwned;
+  promptSubmitButton.disabled = !inputOwned || composerSending;
+  attachmentToggle.disabled = !inputOwned;
   uploadAttachmentsButton.disabled = !inputOwned;
   document.querySelectorAll(".keys [data-key]").forEach(button => { button.disabled = !inputOwned; });
   document.querySelectorAll(".terminal-tab [data-close]").forEach(button => {
@@ -136,8 +160,15 @@ function setAdminState(owned, occupied = false) {
   adminTakeoverButton.hidden = !activeClient || adminOwned;
   adminTakeoverButton.textContent = occupied ? "接管管理" : "获取管理权";
   document.querySelectorAll(".admin-action").forEach(button => { button.disabled = !adminOwned; });
+  syncNewTabButtons();
   fileView.setUploadEnabled(adminOwned);
   browserView.setWritable(adminOwned);
+}
+
+function syncNewTabButtons() {
+  for (const id of ["newTabButton", "mobileNewTabButton"]) {
+    document.getElementById(id).disabled = !adminOwned || !selectedWorkspace;
+  }
 }
 
 function claimAdmin(force = false) {
@@ -231,12 +262,21 @@ function saveDraft() {
 }
 function loadDraft() {
   prompt.value = drafts.get(draftKey()) || "";
+  syncPromptHeight();
 }
 
-function showStatus(message) { status.textContent = message; }
+function showStatus(message) {
+  presentStatus(message);
+}
 function connectionState(state, message) {
   setConnectionIndicator(statusIndicator, state);
-  showStatus(message);
+  presentStatus(message, state === "unavailable");
+}
+
+function updateWorkspaceShortcut() {
+  const workspace = workspaces.find(item => item.id === selectedWorkspace);
+  workspaceShortcut.textContent = workspace?.title || "工作区";
+  sidebarToggle.setAttribute("aria-label", `切换工作区：${workspace?.title || "未选择"}`);
 }
 
 function send(message) {
@@ -352,8 +392,11 @@ function attach() {
   localStorage.setItem("cf_cmux_client", selectedClient);
   selectedWorkspace = "";
   selectedSurface = "";
+  updateWorkspaceShortcut();
+  setAttachmentOpen(false);
   setInputState(false);
   prompt.value = "";
+  syncPromptHeight();
   workspaces = [];
   groups = [];
   programs.clear();
@@ -415,11 +458,15 @@ uploadAttachmentsButton.addEventListener("click", async () => {
         showStatus(`上传 ${file.name}：${written}/${total} B`));
       const currentDraft = drafts.get(targetKey) || "";
       drafts.set(targetKey, [currentDraft.trimEnd(), result.path].filter(Boolean).join("\n"));
-      if (stillCurrent()) prompt.value = drafts.get(targetKey);
+      if (stillCurrent()) {
+        prompt.value = drafts.get(targetKey);
+        syncPromptHeight();
+      }
     }
     showStatus("附件路径已加入当前终端草稿；确认内容后再发送");
     terminalFiles.value = "";
     clearAttachmentPreview();
+    setAttachmentOpen(false);
   } catch (error) {
     showStatus(`附件上传中断：${error.message}；已成功的路径保留在原终端草稿`);
   } finally {
@@ -556,6 +603,8 @@ function selectWorkspace(id) {
     selectedTabs.get(tabKey(id)) || localStorage.getItem(`cf_cmux_tab_${tabKey(id)}`) || "";
   const workspaceChanged = selectedWorkspace !== id;
   selectedWorkspace = id;
+  updateWorkspaceShortcut();
+  syncNewTabButtons();
   if (workspaceChanged) browserView.workspaceChanged();
   localStorage.setItem(`cf_cmux_workspace_${selectedClient}`, id);
   selectedSurface = chooseSurface(workspace, previousSurface);
@@ -636,6 +685,7 @@ async function refreshWorkspaces() {
   if (epoch !== sessionEpoch || version !== listRequestVersion) return;
   workspaces = cmuxWorkspaces(result);
   groups = cmuxGroups(result);
+  updateWorkspaceShortcut();
   prunePrograms(programs, workspaces);
   nextUnreadButton.disabled = !nextUnreadWorkspace(workspaces, selectedWorkspace);
   renderWorkspaces();
@@ -653,6 +703,9 @@ async function refreshWorkspaces() {
     else {
       selectedWorkspace = "";
       selectedSurface = "";
+      updateWorkspaceShortcut();
+      syncNewTabButtons();
+      setInputState(false);
       updateProgramStatus();
       title.textContent = "cmux 中没有可用的终端工作区";
       terminal.reset();
@@ -893,7 +946,7 @@ nextUnreadButton.addEventListener("click", () => {
   const next = nextUnreadWorkspace(workspaces, selectedWorkspace);
   if (next) selectWorkspace(next);
 });
-for (const id of ["workspaceButton", "groupButton", "newTabButton"]) {
+for (const id of ["workspaceButton", "groupButton", "newTabButton", "mobileNewTabButton"]) {
   document.getElementById(id).classList.add("admin-action");
 }
 adminTakeoverButton.addEventListener("click", () => claimAdmin(true));
@@ -921,18 +974,20 @@ document.getElementById("groupButton").addEventListener("click", () => {
   const directory = workspaces.find(item => item.id === selectedWorkspace)?.directory || "";
   void mutate("group_create", { title: name, directory }, "创建分组");
 });
-document.getElementById("newTabButton").addEventListener("click", () => {
-  if (selectedWorkspace) void mutate("terminal_create",
-    { workspace_id: selectedWorkspace, surface_id: "" }, "新建终端");
-});
+for (const id of ["newTabButton", "mobileNewTabButton"]) {
+  document.getElementById(id).addEventListener("click", () => {
+    if (selectedWorkspace && adminOwned) void mutate("terminal_create",
+      { workspace_id: selectedWorkspace, surface_id: "" }, "新建终端");
+  });
+}
 document.getElementById("filesToggleButton").addEventListener("click", drawer.close);
 document.getElementById("browserToggleButton").addEventListener("click", drawer.close);
 takeoverButton.addEventListener("click", () => claimInput(true));
 document.getElementById("promptForm").addEventListener("submit", event => {
   event.preventDefault();
-  if (!selectedSurface || !prompt.value || composerSending) return;
+  if (!selectedSurface || !inputOwned || !prompt.value || composerSending) return;
   composerSending = true;
-  document.querySelector("#promptForm button").disabled = true;
+  promptSubmitButton.disabled = true;
   const text = prompt.value;
   const targetSurface = selectedSurface;
   const targetWorkspace = selectedWorkspace;
@@ -948,14 +1003,15 @@ document.getElementById("promptForm").addEventListener("submit", event => {
     if (targetSurface === selectedSurface && targetWorkspace === selectedWorkspace) {
       if (prompt.value === text) prompt.value = "";
       drafts.set(draftKey(), prompt.value);
+      syncPromptHeight();
       void refreshSnapshot();
     }
   }).catch(error => showStatus(error.message)).finally(() => {
     composerSending = false;
-    document.querySelector("#promptForm button").disabled = !inputOwned;
+    promptSubmitButton.disabled = !inputOwned;
   });
 });
-prompt.addEventListener("input", saveDraft);
+prompt.addEventListener("input", () => { saveDraft(); syncPromptHeight(); });
 prompt.addEventListener("keydown", event => {
   if (!shouldSubmitComposer(event)) return;
   event.preventDefault();

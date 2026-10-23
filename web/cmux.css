@@ -3,13 +3,15 @@
 body { margin: 0; background: #191d27; color: #e6e9f2; }
 header { display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 18px; border-bottom: 1px solid #333a4d; }
 header a { color: #8cb9ef; text-decoration: none; }
-.connection-status { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; min-width: 0; }
+.connection-status { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; min-width: 0; padding: 0; border: 0; background: transparent; }
 header #status { color: #aeb9cc; font-size: 13px; }
 .status-indicator { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: #8390a5; }
 .status-indicator[data-state="ready"] { background: #4daf7a; box-shadow: 0 0 0 3px #4daf7a24; }
 .status-indicator[data-state="connecting"] { background: #d9a750; }
 .status-indicator[data-state="unavailable"] { background: #e37777; }
 #sidebarToggle { display: none; }
+.workspace-menu-icon, .mobile-tools, .mobile-extra-keys, #mobileNewTabButton, #attachmentToggle { display: none; }
+.tab-strip { min-width: 0; }
 main { display: flex; height: calc(100dvh - 56px); min-height: 320px; }
 aside { width: min(300px, 35vw); overflow: auto; padding: 16px; border-right: 1px solid #333a4d; }
 aside select { width: 100%; margin: 9px 0 24px; padding: 10px; color: inherit; background: #252b39; border: 1px solid #485268; border-radius: 8px; }
@@ -79,21 +81,51 @@ button:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
 #attachmentPreview img { max-width: 55px; max-height: 55px; object-fit: contain; }
 @media (max-width: 680px) {
   html, body { height: 100%; overflow: hidden; }
-  header { position: relative; z-index: 23; gap: 8px; padding: 0 10px; font-size: 13px; }
-  header a, header strong { white-space: nowrap; }
-  header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  header #status { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #sidebarToggle { display: block; flex-shrink: 0; padding: 5px 7px; font-size: 12px; }
+  header { position: relative; z-index: 23; height: 48px; gap: 4px; padding: 0 8px; font-size: 13px; }
+  header strong { display: none; }
+  header .back-link { display: grid; place-items: center; flex: 0 0 44px; height: 44px; font-size: 0; }
+  header .back-link::before { content: "←"; font-size: 22px; }
+  #sidebarToggle {
+    display: flex; align-items: center; flex: 1; min-width: 0; height: 44px;
+    padding: 0 8px; text-align: left; background: transparent; border: 0;
+  }
+  #sidebarToggle #workspaceShortcut { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .workspace-menu-icon { display: inline; margin-right: 7px; flex-shrink: 0; }
+  #sidebarToggle::after { content: "⌄"; margin-left: 6px; flex-shrink: 0; }
+  .connection-status { flex: 0 0 44px; width: 44px; height: 44px; justify-content: center; margin: 0; }
+  header #status {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+  .connection-status.expanded #status {
+    top: 48px; right: 52px; width: auto; height: auto; z-index: 26;
+    max-width: min(310px, calc(100vw - 60px)); padding: 10px 12px; white-space: normal;
+    overflow: visible; clip-path: none; overflow-wrap: anywhere; text-align: left; color: #e6e9f2;
+    background: #303b51; border: 1px solid #46536a; border-radius: 8px;
+    box-shadow: 0 8px 24px #0007;
+  }
+  .mobile-tools { display: block; flex: 0 0 44px; }
+  .mobile-tools summary, .mobile-extra-keys summary {
+    display: grid; place-items: center; width: 44px; height: 44px;
+    list-style: none; cursor: pointer; font-size: 20px;
+  }
+  .mobile-tools summary::-webkit-details-marker, .mobile-extra-keys summary::-webkit-details-marker { display: none; }
+  .mobile-menu {
+    display: grid; gap: 4px; position: absolute; top: 48px; right: 8px; z-index: 27;
+    min-width: 150px; padding: 6px; background: #252b39; border: 1px solid #46536a;
+    border-radius: 8px; box-shadow: 0 8px 24px #0007;
+  }
+  .mobile-menu button { min-height: 44px; text-align: left; }
   #sidebarScrim:not([hidden]) {
-    position: fixed; inset: 56px 0 0; z-index: 21;
+    position: fixed; inset: 48px 0 0; z-index: 21;
     background: #0009;
   }
-  main { flex-direction: column; min-height: 0; overflow: hidden; }
+  main { flex-direction: column; height: calc(100dvh - 48px); min-height: 0; overflow: hidden; }
   aside {
     display: none;
     position: fixed;
     z-index: 22;
-    top: 56px;
+    top: 48px;
     bottom: 0;
     width: min(360px, 90vw);
     max-height: none;
@@ -104,10 +136,40 @@ button:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
   }
   body.cmux-drawer-open aside { display: block; }
   .terminal-pane { min-height: 0; }
+  #terminalTitle, .terminal-pane.input-owned .input-ownership, .tab-actions { display: none; }
+  .input-ownership { min-height: 44px; padding: 4px 8px; font-size: 12px; }
+  .input-ownership button { min-height: 36px; margin-left: auto; }
+  .tab-strip { display: flex; align-items: center; border-bottom: 1px solid #333a4d; }
+  #terminalTabs { flex: 1; min-width: 0; padding: 4px 6px; }
+  #terminalTabs button { min-height: 40px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #mobileNewTabButton { display: block; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; margin-right: 6px; }
+  #terminal { min-height: 0; padding: 4px 6px; }
+  .keys { position: relative; gap: 4px; padding: 3px 6px; overflow: visible; }
+  .keys > button { min-width: 44px; min-height: 44px; padding: 5px 7px; font-size: 13px; }
+  .keys > .desktop-key { display: none; }
+  .mobile-extra-keys { display: block; flex-shrink: 0; }
+  .extra-key-panel {
+    display: flex; gap: 6px; position: absolute; right: 6px; bottom: 100%; z-index: 20;
+    padding: 6px; background: #252b39; border: 1px solid #46536a; border-radius: 8px;
+    box-shadow: 0 -6px 20px #0007;
+  }
+  .extra-key-panel button { min-width: 44px; min-height: 44px; }
+  .extra-tab { display: none; }
+  #promptForm { align-items: flex-end; gap: 6px; padding: 4px 8px max(4px, env(safe-area-inset-bottom)); }
+  #promptForm button { flex-shrink: 0; min-width: 44px; min-height: 44px; padding: 6px; }
+  #attachmentToggle { display: block; font-size: 18px; }
+  #prompt { height: 44px; min-height: 44px; max-height: 112px; padding: 9px 10px; line-height: 24px; font-size: 16px; resize: none; overflow-y: auto; }
+  #terminalPane > .upload-controls { display: none; max-height: 35dvh; overflow: auto; }
+  #terminalPane.attachments-open > .upload-controls { display: block; }
+  #terminalPane > .upload-controls button { min-height: 44px; }
   aside select { margin: 3px 0; }
   aside h2 { margin: 6px 0; }
   #workspaces { display: block; }
   .workspace { min-width: 0; margin: 6px 0; }
   #terminal { padding: 4px; }
   .file-pane { padding: 8px 12px; }
+}
+@media (max-width: 390px) {
+  .keys > button[data-key="tab"] { display: none; }
+  .extra-tab { display: block; }
 }
