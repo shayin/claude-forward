@@ -1,6 +1,5 @@
 import { renderGrid } from "./cmux-render.mjs?v=20261024-auto-scroll";
 import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-auto-scroll";
-import { createCmuxActivePoll } from "./cmux-active-poll.mjs";
 import { createCmuxFrameOrder } from "./cmux-frame-order.mjs";
 import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs";
 import { createScrollPositions } from "./cmux-scroll-position.mjs";
@@ -17,7 +16,7 @@ import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-auto-scroll";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-batch";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -130,16 +129,20 @@ const scrollController = mountCmuxScroll({
     });
     if (client === activeClient && workspace === selectedWorkspace &&
         surface === selectedSurface && epoch === sessionEpoch) {
-      if (result?.render_grid) applySnapshot(result, workspace, surface, epoch, sequence);
-      else void refreshSnapshot(true);
+      if (result?.render_grid) {
+        if (!scrollController.hasPendingRemote()) {
+          applySnapshot(result, workspace, surface, epoch, sequence);
+        }
+      } else {
+        void refreshSnapshot(true);
+      }
     }
   },
-  onRemoteError: error => showStatus(`终端滚动失败：${error.message}`),
-  onRemoteActivity: () => activePoll.activate(),
+  onRemoteError: error => {
+    showStatus(`终端滚动失败：${error.message}`);
+    void refreshSnapshot(true);
+  },
   onReturnToBottom: () => void refreshSnapshot(true)
-});
-const activePoll = createCmuxActivePoll(() => {
-  if (document.visibilityState === "visible" && !terminalPane.hidden) void refreshSnapshot();
 });
 const fileView = mountCmuxFiles({
   request,
@@ -147,7 +150,6 @@ const fileView = mountCmuxFiles({
   canUpload: () => adminOwned,
   onShow: () => {
     browserView.hide(false);
-    activePoll.stop();
     scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
@@ -160,7 +162,6 @@ const browserView = mountCmuxBrowser({
   canManage: () => adminOwned,
   onShow: () => {
     fileView.reset();
-    activePoll.stop();
     scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
@@ -277,7 +278,6 @@ new ResizeObserver(() => {
 }).observe(terminalElement);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
-    activePoll.stop();
     releaseInput(selectedSurface);
     releaseAdmin();
     setInputState(false);
@@ -419,7 +419,6 @@ function renderClients(clientList) {
 
 function attach() {
   if (!selectedClient) return;
-  activePoll.stop();
   scrollController.reset();
   fileView.reset();
   browserView.reset();
@@ -655,7 +654,6 @@ function selectWorkspace(id) {
   if (!pendingPosition) scrollPositions.save(activeClient, selectedWorkspace, selectedSurface,
     lastGridFrame?.alternateScreen === true, terminalElement, terminal);
   pendingPosition = true;
-  activePoll.stop();
   scrollController.reset();
   saveDraft();
   const previousSelectedSurface = selectedSurface;
@@ -699,7 +697,6 @@ function renderTabs(workspace) {
         lastGridFrame?.alternateScreen === true, terminalElement, terminal);
       pendingPosition = true;
       saveDraft();
-      activePoll.stop();
       scrollController.reset();
       const oldSurface = selectedSurface;
       selectedSurface = surface.id;
@@ -786,6 +783,7 @@ async function refreshWorkspaces() {
 
 async function refreshSnapshot(urgent = false) {
   if (!selectedSurface || !activeClient) return;
+  if (!urgent && scrollController.isRemoteActive()) return;
   if (scrollController.holdFrame()) return;
   const surface = selectedSurface;
   const workspace = selectedWorkspace;
@@ -800,7 +798,9 @@ async function refreshSnapshot(urgent = false) {
   const sequence = frameOrder.issue();
   try {
     const result = await request("snapshot", { workspace_id: workspace, surface_id: surface });
-    applySnapshot(result, workspace, surface, epoch, sequence);
+    if (urgent || !scrollController.isRemoteActive()) {
+      applySnapshot(result, workspace, surface, epoch, sequence);
+    }
   } catch (error) {
     showStatus(error.message);
   } finally {
@@ -808,7 +808,7 @@ async function refreshSnapshot(urgent = false) {
       snapshotInFlight = null;
       if (snapshotAfterFlight) {
         snapshotAfterFlight = false;
-        if (!scrollController.holdFrame()) void refreshSnapshot();
+        if (!scrollController.holdFrame()) void refreshSnapshot(true);
       }
     }
   }
@@ -1003,7 +1003,6 @@ function connect() {
         setInputState(false);
         setAdminState(false);
         browserView.reset();
-        activePoll.stop();
         sessionEpoch += 1;
         clearPending("Client 已离线");
         connectionState("unavailable", "Client 已离线，等待重新连接");
@@ -1032,7 +1031,6 @@ function connect() {
     setInputState(false);
     setAdminState(false);
     browserView.reset();
-    activePoll.stop();
     sessionEpoch += 1;
     connectionState("connecting", "连接中断，正在重连…");
     clearInterval(clientDiscoveryTimer);
@@ -1188,7 +1186,6 @@ if (xtermTextarea) bindMobileTerminalTextInput({
 });
 
 window.addEventListener("pagehide", () => {
-  activePoll.stop();
   scrollController.reset();
   releaseInput(selectedSurface);
   releaseAdmin();

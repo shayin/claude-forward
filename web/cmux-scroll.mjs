@@ -83,7 +83,8 @@ export function mountCmuxScroll({
     const current = generation;
     try {
       while (current === generation && alternateScreen && canRemoteScroll() && remoteLines) {
-        const lines = Math.max(-8, Math.min(8, remoteLines));
+        // 一次 RPC 已包含远端滚动及回放；不要把一次滑动拆成多次串行往返。
+        const lines = Math.max(-32, Math.min(32, remoteLines));
         remoteLines -= lines;
         await sendRemoteScroll(lines);
       }
@@ -269,5 +270,6 @@ export function mountCmuxScroll({
     }
   });
   return { holdFrame, reset, cancelRemote, setAlternateScreen, restoreBrowsing,
-    isBrowsing: () => browsing };
+    isBrowsing: () => browsing, isRemoteActive: () => remoteBusy || remoteLines !== 0,
+    hasPendingRemote: () => remoteLines !== 0 };
 }

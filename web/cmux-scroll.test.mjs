@@ -201,15 +201,68 @@ test("无本地溢出时保留桌面滚轮远端队列，切换终端丢弃旧�
   });
   wheel(-180);
   wheel(-70);
-  assert.deepEqual(f.remote, [-8]);
+  assert.deepEqual(f.remote, [-10]);
+  assert.equal(f.controller.isRemoteActive(), true);
+  assert.equal(f.controller.hasPendingRemote(), true);
   resolve();
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepEqual(f.remote, [-8, -5]);
+  assert.deepEqual(f.remote, [-10, -3]);
   f.controller.reset();
   resolve();
   await Promise.resolve();
-  assert.deepEqual(f.remote, [-8, -5]);
+  assert.deepEqual(f.remote, [-10, -3]);
+});
+
+test("远程滚动在途期间合并快速滑动，最多再发一批而不是逐帧往返", async () => {
+  let resolve;
+  const f = fixture(() => new Promise(done => { resolve = done; }));
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setMouseScroll(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  const wheel = deltaY => f.listeners.get("wheel")({
+    deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  wheel(-18);
+  wheel(-540);
+  wheel(-180);
+  assert.deepEqual(f.remote, [-1]);
+  assert.equal(f.controller.hasPendingRemote(), true);
+  resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(f.remote, [-1, -32]);
+  resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(f.controller.hasPendingRemote(), false);
+  assert.equal(f.controller.isRemoteActive(), false);
+});
+
+test("远程滚动失败时清空队列并允许下一次手势重试", async () => {
+  let fail = true;
+  const f = fixture(() => fail ? Promise.reject(new Error("network")) : Promise.resolve());
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setMouseScroll(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  const wheel = deltaY => f.listeners.get("wheel")({
+    deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  wheel(-18);
+  wheel(-180);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(f.remote, [-1]);
+  assert.equal(f.errors.length, 1);
+  assert.equal(f.controller.hasPendingRemote(), false);
+  fail = false;
+  wheel(-36);
+  await Promise.resolve();
+  assert.deepEqual(f.remote, [-1, -2]);
 });
 
 test("桌面滚轮失去输入权后不补发旧位移，手机触摸仍可本地查看", async () => {
@@ -225,7 +278,7 @@ test("桌面滚轮失去输入权后不补发旧位移，手机触摸仍可本�
   });
   wheel(-180);
   wheel(-70);
-  assert.deepEqual(f.remote, [-8]);
+  assert.deepEqual(f.remote, [-10]);
   f.setWritable(false);
   f.controller.cancelRemote();
   wheel(-70);
@@ -243,7 +296,7 @@ test("桌面滚轮失去输入权后不补发旧位移，手机触摸仍可本�
   resolve();
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepEqual(f.remote, [-8, -1]);
+  assert.deepEqual(f.remote, [-10, -1]);
   resolve();
   await Promise.resolve();
 });
@@ -282,22 +335,22 @@ test("鼠标模式关闭后不再发送滚轮位移，也不补发排队位移",
   });
   wheel(-180);
   wheel(-70);
-  assert.deepEqual(f.remote, [-8]);
+  assert.deepEqual(f.remote, [-10]);
   f.setMouseScroll(false);
   wheel(-70);
   resolve();
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepEqual(f.remote, [-8]);
+  assert.deepEqual(f.remote, [-10]);
   f.element.scrollHeight = 850;
   f.element.scrollTop = 370;
   wheel(-36);
   assert.equal(f.element.scrollTop, 334);
-  assert.deepEqual(f.remote, [-8]);
+  assert.deepEqual(f.remote, [-10]);
   f.setMouseScroll(true);
   f.element.scrollHeight = f.element.clientHeight;
   wheel(-18);
-  assert.deepEqual(f.remote, [-8, -1]);
+  assert.deepEqual(f.remote, [-10, -1]);
   resolve();
   await Promise.resolve();
 });
