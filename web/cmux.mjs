@@ -3,6 +3,7 @@ import { alternateFramePatch } from "./cmux-frame-update.mjs";
 import { createCmuxActivePoll } from "./cmux-active-poll.mjs";
 import { createCmuxFrameOrder } from "./cmux-frame-order.mjs";
 import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs";
+import { createScrollPositions } from "./cmux-scroll-position.mjs";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
   visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
@@ -81,6 +82,9 @@ let workspaces = [];
 let groups = [];
 const programs = new Map();
 let unreadOnly = localStorage.getItem("cf_cmux_unread_only") === "1";
+let remoteScrollEnabled = localStorage.getItem("cf_cmux_remote_scroll") === "1";
+const remoteScrollCheckbox = document.getElementById("remoteScrollEnabled");
+remoteScrollCheckbox.checked = remoteScrollEnabled;
 let pollTimer;
 let listTimer;
 let notificationTimer;
@@ -97,6 +101,8 @@ let snapshotAfterFlight = false;
 let lastFrame = "";
 let lastGridFrame = null;
 const frameOrder = createCmuxFrameOrder();
+const scrollPositions = createScrollPositions();
+let pendingPosition = false;
 let stopped = false;
 let pointerStart = null;
 let viewportTimer;
@@ -117,14 +123,15 @@ const scrollController = mountCmuxScroll({
   element: terminalElement,
   terminal,
   isSelected: () => Boolean(selectedSurface && !terminalPane.hidden),
-  canRemoteScroll: () => Boolean(inputOwned && selectedSurface && !terminalPane.hidden),
+  canRemoteScroll: () => Boolean(remoteScrollEnabled && inputOwned && selectedSurface && !terminalPane.hidden),
+  remoteTouchEnabled: () => remoteScrollEnabled,
   sendRemoteScroll: async lines => {
     const client = activeClient, workspace = selectedWorkspace, surface = selectedSurface;
     const epoch = sessionEpoch, sequence = frameOrder.issue();
     const result = await request("scroll", {
       workspace_id: workspace, surface_id: surface, delta_lines: lines
     });
-    if (client === activeClient && workspace === selectedWorkspace &&
+    if (remoteScrollEnabled && client === activeClient && workspace === selectedWorkspace &&
         surface === selectedSurface && epoch === sessionEpoch) {
       if (result?.render_grid) applySnapshot(result, workspace, surface, epoch, sequence);
       else void refreshSnapshot(true);
@@ -267,7 +274,7 @@ async function reportViewport() {
 
 new ResizeObserver(() => {
   scheduleViewport();
-  if (lastGridFrame?.alternateScreen && !scrollController.holdFrame()) {
+  if (lastGridFrame?.alternateScreen && !pendingPosition && !scrollController.holdFrame()) {
     showLatestScreen(terminalElement);
   }
 }).observe(terminalElement);
@@ -644,19 +651,24 @@ function selectWorkspace(id) {
   const workspace = workspaces.find(item => item.id === id);
   if (!workspace) return;
   drawer.close();
+  const previousSurface = selectedWorkspace === id ? selectedSurface :
+    selectedTabs.get(tabKey(id)) || localStorage.getItem(`cf_cmux_tab_${tabKey(id)}`) || "";
+  const nextSurface = chooseSurface(workspace, previousSurface);
+  if (selectedWorkspace === id && selectedSurface === nextSurface) return;
+  if (!pendingPosition) scrollPositions.save(activeClient, selectedWorkspace, selectedSurface,
+    lastGridFrame?.alternateScreen === true, terminalElement, terminal);
+  pendingPosition = true;
   activePoll.stop();
   scrollController.reset();
   saveDraft();
   const previousSelectedSurface = selectedSurface;
-  const previousSurface = selectedWorkspace === id ? selectedSurface :
-    selectedTabs.get(tabKey(id)) || localStorage.getItem(`cf_cmux_tab_${tabKey(id)}`) || "";
   const workspaceChanged = selectedWorkspace !== id;
   selectedWorkspace = id;
   updateWorkspaceShortcut();
   syncNewTabButtons();
   if (workspaceChanged) browserView.workspaceChanged();
   localStorage.setItem(`cf_cmux_workspace_${selectedClient}`, id);
-  selectedSurface = chooseSurface(workspace, previousSurface);
+  selectedSurface = nextSurface;
   if (previousSelectedSurface !== selectedSurface) {
     releaseInput(previousSelectedSurface);
     setInputState(false);
@@ -685,6 +697,10 @@ function renderTabs(workspace) {
     button.textContent = `${surface.title || surface.id}${agent ? ` · ${agent}` : ""}`;
     button.classList.toggle("active", surface.id === selectedSurface);
     button.addEventListener("click", () => {
+      if (selectedSurface === surface.id && selectedWorkspace === workspace.id) return;
+      if (!pendingPosition) scrollPositions.save(activeClient, selectedWorkspace, selectedSurface,
+        lastGridFrame?.alternateScreen === true, terminalElement, terminal);
+      pendingPosition = true;
       saveDraft();
       activePoll.stop();
       scrollController.reset();
@@ -777,11 +793,12 @@ async function refreshSnapshot(urgent = false) {
   const surface = selectedSurface;
   const workspace = selectedWorkspace;
   const epoch = sessionEpoch;
-  if (snapshotInFlight?.surface === surface && snapshotInFlight.epoch === epoch) {
+  if (snapshotInFlight?.surface === surface && snapshotInFlight.workspace === workspace &&
+      snapshotInFlight.epoch === epoch) {
     if (urgent) snapshotAfterFlight = true;
     return;
   }
-  const flight = { surface, epoch };
+  const flight = { surface, workspace, epoch };
   snapshotInFlight = flight;
   const sequence = frameOrder.issue();
   try {
@@ -821,10 +838,18 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     lastFrame = frame.content;
     lastGridFrame = frame;
     const showLatestIfCurrent = () => {
-      if (frame.alternateScreen && surface === selectedSurface &&
+      if (surface === selectedSurface &&
           workspace === selectedWorkspace && epoch === sessionEpoch &&
           lastGridFrame === frame && !scrollController.holdFrame()) {
-        showLatestScreen(terminalElement);
+        if (pendingPosition) {
+          pendingPosition = false;
+          const restored = scrollPositions.restore(activeClient, workspace, surface,
+            frame.alternateScreen, terminalElement, terminal);
+          if (restored) scrollController.restoreBrowsing();
+          else if (frame.alternateScreen) showLatestScreen(terminalElement);
+        } else if (frame.alternateScreen) {
+          showLatestScreen(terminalElement);
+        }
       }
     };
     if (patch !== null) {
@@ -850,6 +875,7 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
       terminal.reset();
       terminal.write(text);
     }
+    pendingPosition = false;
   }
 }
 
@@ -1037,6 +1063,18 @@ unreadOnlyElement.addEventListener("change", () => {
   unreadOnly = unreadOnlyElement.checked;
   localStorage.setItem("cf_cmux_unread_only", unreadOnly ? "1" : "0");
   renderWorkspaces();
+});
+remoteScrollCheckbox.addEventListener("change", () => {
+  remoteScrollEnabled = remoteScrollCheckbox.checked;
+  localStorage.setItem("cf_cmux_remote_scroll", remoteScrollEnabled ? "1" : "0");
+  scrollController.reset();
+  scrollController.setAlternateScreen(lastGridFrame?.alternateScreen === true);
+  if (remoteScrollEnabled && lastGridFrame?.alternateScreen) {
+    showLatestScreen(terminalElement);
+    void refreshSnapshot(true);
+  } else {
+    scrollController.restoreBrowsing();
+  }
 });
 nextUnreadButton.addEventListener("click", () => {
   const next = nextUnreadWorkspace(workspaces, selectedWorkspace);

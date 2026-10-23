@@ -9,6 +9,8 @@ function fixture(send = () => Promise.resolve()) {
   let clock = 0;
   let selected = true;
   let writable = false;
+  let remoteEnabled = true;
+  let remoteTouchEnabled = false;
   const remote = [];
   const errors = [];
   let activities = 0;
@@ -35,7 +37,9 @@ function fixture(send = () => Promise.resolve()) {
     querySelector() { return { getBoundingClientRect: () => ({ height: 360 }) }; }
   };
   const controller = mountCmuxScroll({
-    element, terminal, isSelected: () => selected, canRemoteScroll: () => writable,
+    element, terminal, isSelected: () => selected,
+    canRemoteScroll: () => writable && remoteEnabled,
+    remoteTouchEnabled: () => remoteTouchEnabled,
     sendRemoteScroll: lines => { remote.push(lines); return send(lines); },
     onRemoteError: error => errors.push(error),
     onRemoteActivity: () => { activities++; },
@@ -64,6 +68,12 @@ function fixture(send = () => Promise.resolve()) {
     controller, buffer, terminal, element, remote, errors, listeners, touch, flush,
     setTime(value) { clock = value; },
     setWritable(value) { writable = value; },
+    setRemoteEnabled(value) {
+      remoteEnabled = value;
+      remoteTouchEnabled = value;
+      if (!value) controller.cancelRemote();
+    },
+    setRemoteTouchEnabled(value) { remoteTouchEnabled = value; },
     setSelected(value) { selected = value; },
     get resumed() { return resumed; },
     get activities() { return activities; }
@@ -259,4 +269,71 @@ test("全屏手机的惯性只移动本地画面，再次触摸停止旧惯性",
   f.setWritable(false);
   assert.deepEqual(f.remote, []);
   assert.equal(f.activities, 0);
+});
+
+test("关闭远程滚动后不再发送桌面滚轮位移，也不补发排队位移", async () => {
+  let resolve;
+  const f = fixture(() => new Promise(done => { resolve = done; }));
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  const wheel = deltaY => f.listeners.get("wheel")({
+    deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  wheel(-180);
+  wheel(-70);
+  assert.deepEqual(f.remote, [-8]);
+  f.setRemoteEnabled(false);
+  wheel(-70);
+  resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(f.remote, [-8]);
+  f.element.scrollHeight = 850;
+  f.element.scrollTop = 370;
+  wheel(-36);
+  assert.equal(f.element.scrollTop, 334);
+  assert.deepEqual(f.remote, [-8]);
+  f.setRemoteEnabled(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  wheel(-18);
+  assert.deepEqual(f.remote, [-8, -1]);
+  resolve();
+  await Promise.resolve();
+});
+
+test("恢复非底部阅读位置后暂停新快照，回到底部才恢复", () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.element.scrollTop = 180;
+  f.controller.restoreBrowsing();
+  assert.equal(f.controller.holdFrame(), true);
+  f.element.scrollTop = 370;
+  f.controller.restoreBrowsing();
+  assert.equal(f.controller.holdFrame(), false);
+});
+
+test("开关可对比手机全屏远程滚动与本地滚动，远端不改变本地容器位置", async () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setRemoteTouchEnabled(true);
+  f.touch("touchstart", 100);
+  f.setTime(2000);
+  f.touch("touchmove", 220);
+  assert.equal(f.controller.holdFrame(), false);
+  assert.equal(f.element.scrollTop, 370);
+  assert.deepEqual(f.remote, [-6]);
+  f.touch("touchend", 220);
+  f.setRemoteTouchEnabled(false);
+  f.controller.reset();
+  f.controller.setAlternateScreen(true);
+  f.touch("touchstart", 100);
+  f.setTime(4000);
+  f.touch("touchmove", 220);
+  f.flush();
+  assert.equal(f.element.scrollTop, 250);
+  assert.deepEqual(f.remote, [-6]);
+  await Promise.resolve();
 });
