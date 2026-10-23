@@ -1,7 +1,6 @@
-// 默认手机触摸只浏览已收到的画面；可显式开启全屏 TUI 远程滚动以对比体验。
+// 普通历史在本地浏览；支持鼠标滚动的全屏 TUI 将手势交给远端程序。
 export function mountCmuxScroll({
   element, terminal, isSelected, canRemoteScroll, sendRemoteScroll, onRemoteError,
-  remoteTouchEnabled = () => false,
   onReturnToBottom, onRemoteActivity = () => {},
   raf = requestAnimationFrame, cancelRaf = cancelAnimationFrame, now = performance.now.bind(performance)
 }) {
@@ -125,7 +124,7 @@ export function mountCmuxScroll({
     cancelMotion();
     if (alternateScreen) cancelRemote();
     touching = true;
-    remoteTouchActive = alternateScreen && remoteTouchEnabled() && canRemoteScroll();
+    remoteTouchActive = alternateScreen && canRemoteScroll();
     dragging = false;
     const touch = event.touches[0];
     startY = lastY = touch.clientY;
@@ -181,7 +180,7 @@ export function mountCmuxScroll({
         const elapsed = Math.min(32, Math.max(1, time - previous));
         previous = time;
         velocity *= Math.exp(-elapsed / 140);
-        if (!alternateScreen || !remoteTouchEnabled() || !canRemoteScroll() ||
+        if (!alternateScreen || !canRemoteScroll() ||
             Math.abs(velocity) < .12 || time - started > 400) {
           remoteTouchActive = false;
           momentumFrame = 0;
@@ -237,13 +236,13 @@ export function mountCmuxScroll({
     if (alternateScreen) {
       const pixels = event.deltaMode === 1 ? event.deltaY * lineHeight() :
         event.deltaMode === 2 ? event.deltaY * lineHeight() * terminal.rows : event.deltaY;
-      if (element.scrollHeight > element.clientHeight + 1) {
+      if (canRemoteScroll()) {
+        queueRemote(pixels);
+      } else if (element.scrollHeight > element.clientHeight + 1) {
         const wasBrowsing = browsing;
         element.scrollTop += pixels;
         browsing = !atBottom();
         if (wasBrowsing && !browsing) onReturnToBottom();
-      } else if (canRemoteScroll()) {
-        queueRemote(pixels);
       }
       event.preventDefault();
       event.stopImmediatePropagation();

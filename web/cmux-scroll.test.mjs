@@ -9,8 +9,7 @@ function fixture(send = () => Promise.resolve()) {
   let clock = 0;
   let selected = true;
   let writable = false;
-  let remoteEnabled = true;
-  let remoteTouchEnabled = false;
+  let mouseScroll = false;
   const remote = [];
   const errors = [];
   let activities = 0;
@@ -38,8 +37,7 @@ function fixture(send = () => Promise.resolve()) {
   };
   const controller = mountCmuxScroll({
     element, terminal, isSelected: () => selected,
-    canRemoteScroll: () => writable && remoteEnabled,
-    remoteTouchEnabled: () => remoteTouchEnabled,
+    canRemoteScroll: () => writable && mouseScroll,
     sendRemoteScroll: lines => { remote.push(lines); return send(lines); },
     onRemoteError: error => errors.push(error),
     onRemoteActivity: () => { activities++; },
@@ -68,12 +66,10 @@ function fixture(send = () => Promise.resolve()) {
     controller, buffer, terminal, element, remote, errors, listeners, touch, flush,
     setTime(value) { clock = value; },
     setWritable(value) { writable = value; },
-    setRemoteEnabled(value) {
-      remoteEnabled = value;
-      remoteTouchEnabled = value;
+    setMouseScroll(value) {
+      mouseScroll = value;
       if (!value) controller.cancelRemote();
     },
-    setRemoteTouchEnabled(value) { remoteTouchEnabled = value; },
     setSelected(value) { selected = value; },
     get resumed() { return resumed; },
     get activities() { return activities; }
@@ -152,7 +148,7 @@ test("全屏手机只滚动已收到的画面，失去输入权仍可阅读", ()
   assert.deepEqual(f.remote, []);
 });
 
-test("普通屏滚轮交给 xterm，全屏已有画面在本机滚动", async () => {
+test("普通屏滚轮交给 xterm，未启用鼠标的全屏画面在本机滚动", async () => {
   const f = fixture();
   const wheel = deltaY => {
     let prevented = false;
@@ -197,6 +193,7 @@ test("无本地溢出时保留桌面滚轮远端队列，切换终端丢弃旧�
   const f = fixture(() => new Promise(done => { resolve = done; }));
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
+  f.setMouseScroll(true);
   f.element.scrollHeight = f.element.clientHeight;
   const wheel = deltaY => f.listeners.get("wheel")({
     deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
@@ -220,6 +217,7 @@ test("桌面滚轮失去输入权后不补发旧位移，手机触摸仍可本�
   const f = fixture(() => new Promise(done => { resolve = done; }));
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
+  f.setMouseScroll(true);
   f.element.scrollHeight = f.element.clientHeight;
   const wheel = deltaY => f.listeners.get("wheel")({
     deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
@@ -271,11 +269,12 @@ test("全屏手机的惯性只移动本地画面，再次触摸停止旧惯性",
   assert.equal(f.activities, 0);
 });
 
-test("关闭远程滚动后不再发送桌面滚轮位移，也不补发排队位移", async () => {
+test("鼠标模式关闭后不再发送滚轮位移，也不补发排队位移", async () => {
   let resolve;
   const f = fixture(() => new Promise(done => { resolve = done; }));
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
+  f.setMouseScroll(true);
   f.element.scrollHeight = f.element.clientHeight;
   const wheel = deltaY => f.listeners.get("wheel")({
     deltaY, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
@@ -284,7 +283,7 @@ test("关闭远程滚动后不再发送桌面滚轮位移，也不补发排队�
   wheel(-180);
   wheel(-70);
   assert.deepEqual(f.remote, [-8]);
-  f.setRemoteEnabled(false);
+  f.setMouseScroll(false);
   wheel(-70);
   resolve();
   await Promise.resolve();
@@ -295,7 +294,7 @@ test("关闭远程滚动后不再发送桌面滚轮位移，也不补发排队�
   wheel(-36);
   assert.equal(f.element.scrollTop, 334);
   assert.deepEqual(f.remote, [-8]);
-  f.setRemoteEnabled(true);
+  f.setMouseScroll(true);
   f.element.scrollHeight = f.element.clientHeight;
   wheel(-18);
   assert.deepEqual(f.remote, [-8, -1]);
@@ -314,11 +313,11 @@ test("恢复非底部阅读位置后暂停新快照，回到底部才恢复", ()
   assert.equal(f.controller.holdFrame(), false);
 });
 
-test("开关可对比手机全屏远程滚动与本地滚动，远端不改变本地容器位置", async () => {
+test("全屏鼠标模式自动远端滚动，退出鼠标模式后恢复本地滚动", async () => {
   const f = fixture();
   f.controller.setAlternateScreen(true);
   f.setWritable(true);
-  f.setRemoteTouchEnabled(true);
+  f.setMouseScroll(true);
   f.touch("touchstart", 100);
   f.setTime(2000);
   f.touch("touchmove", 220);
@@ -326,7 +325,7 @@ test("开关可对比手机全屏远程滚动与本地滚动，远端不改变�
   assert.equal(f.element.scrollTop, 370);
   assert.deepEqual(f.remote, [-6]);
   f.touch("touchend", 220);
-  f.setRemoteTouchEnabled(false);
+  f.setMouseScroll(false);
   f.controller.reset();
   f.controller.setAlternateScreen(true);
   f.touch("touchstart", 100);
@@ -335,5 +334,21 @@ test("开关可对比手机全屏远程滚动与本地滚动，远端不改变�
   f.flush();
   assert.equal(f.element.scrollTop, 250);
   assert.deepEqual(f.remote, [-6]);
+  await Promise.resolve();
+});
+
+test("有本地历史时全屏鼠标模式仍优先远端滚动", async () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setMouseScroll(true);
+  let prevented = false;
+  f.listeners.get("wheel")({
+    deltaY: -54, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() { prevented = true; }, stopImmediatePropagation() {}
+  });
+  assert.equal(prevented, true);
+  assert.equal(f.element.scrollTop, 370);
+  assert.deepEqual(f.remote, [-3]);
   await Promise.resolve();
 });

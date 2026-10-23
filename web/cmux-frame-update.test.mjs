@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderGrid } from "./cmux-render.mjs";
-import { alternateFramePatch } from "./cmux-frame-update.mjs";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs";
 
 const frame = (rows, cursor = null, alternate = true) => renderGrid({
   columns: 12, rows: 3, active_screen: alternate ? "alternate" : "primary",
@@ -36,4 +36,13 @@ test("主屏、切屏、尺寸变化必须完整重建", () => {
   assert.equal(alternateFramePatch(frame(["top"], null, false), alternate), null);
   assert.equal(alternateFramePatch(alternate, { ...alternate, columns: 13 }), null);
   assert.equal(alternateFramePatch(alternate, { ...alternate, rows: 4 }), null);
+});
+
+test("内容相同但程序切换鼠标模式时仍更新滚动策略", () => {
+  const before = frame(["top"]);
+  assert.equal(sameRenderedFrame(before, { ...before }, before.columns, before.rows), true);
+  assert.equal(sameRenderedFrame(before, { ...before, mouseScroll: true },
+    before.columns, before.rows), false);
+  assert.equal(sameRenderedFrame(null, before, before.columns, before.rows), false);
+  assert.equal(sameRenderedFrame(before, before, before.columns + 1, before.rows), false);
 });

@@ -27,6 +27,22 @@ test("alternate screen keeps only the TUI viewport, not primary-screen history",
   assert.ok(frame.content.startsWith("\x1b[?1049h"));
   assert.ok(!frame.content.includes("old history"));
   assert.match(frame.content, /\x1b\[4G\x1b\[\?25h/);
+  assert.equal(frame.mouseScroll, false);
+});
+
+test("only alternate-screen programs with SGR mouse tracking use remote scrolling", () => {
+  const grid = {
+    columns: 80, rows: 25, row_spans: [],
+    modes: [{ code: 1006, ansi: false, on: true }, { code: 1002, ansi: false, on: true }]
+  };
+  assert.equal(renderGrid({ ...grid, active_screen: "alternate" }).mouseScroll, true);
+  assert.equal(renderGrid({ ...grid, active_screen: "normal" }).mouseScroll, false);
+  assert.equal(renderGrid({ ...grid, active_screen: "alternate", modes: [grid.modes[0]] }).mouseScroll, false);
+  assert.equal(renderGrid({ ...grid, active_screen: "alternate",
+    modes: [{ ...grid.modes[0], on: false }, grid.modes[1]] }).mouseScroll, false);
+  assert.equal(renderGrid({ ...grid, active_screen: "alternate",
+    modes: [{ ...grid.modes[0], ansi: true }, grid.modes[1]] }).mouseScroll, false);
+  assert.equal(renderGrid({ ...grid, active_screen: "alternate", modes: null }).mouseScroll, false);
 });
 
 test("rejects invalid grids and strips embedded terminal controls", () => {

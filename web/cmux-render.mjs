@@ -57,6 +57,10 @@ export function renderGrid(grid) {
   const styleMap = new Map((Array.isArray(grid.styles) ? grid.styles : []).map(style => [style.id, style]));
   const rows = new Map();
   const alternateScreen = grid.active_screen === "alternate";
+  const activeModes = new Set((Array.isArray(grid.modes) ? grid.modes : [])
+    .filter(mode => mode?.ansi === false && mode.on === true).map(mode => mode.code));
+  const mouseScroll = alternateScreen && activeModes.has(1006) &&
+    [1000, 1002, 1003].some(code => activeModes.has(code));
   // alternate screen 没有可回滚历史；将主屏 scrollback 写进去会把 TUI 的顶行挤出视口。
   const scrollback = !alternateScreen && Array.isArray(grid.scrollback_spans)
     ? grid.scrollback_spans : [];
@@ -99,7 +103,8 @@ export function renderGrid(grid) {
   } else {
     content += "\x1b[?25l";
   }
-  return { content, columns, rows: height, alternateScreen, screenLines: alternateScreen ? lines : null,
+  return { content, columns, rows: height, alternateScreen, mouseScroll,
+    screenLines: alternateScreen ? lines : null,
     cursor: cursor && Number.isInteger(cursor.row) && Number.isInteger(cursor.column) &&
       cursor.row >= 0 && cursor.row < height && cursor.column >= 0 && cursor.column < columns
       ? { row: cursor.row, column: cursor.column } : null };

@@ -50,8 +50,6 @@
         <label><input id="unreadOnly" type="checkbox"> 仅看未读</label>
         <button id="nextUnreadButton" type="button">下一未读</button>
       </div>
-      <label class="remote-scroll-setting"><input id="remoteScrollEnabled" type="checkbox">
-        远程滚动全屏终端（关闭时手机只在本地滑动）</label>
       <div id="workspaces" role="list"></div>
       <h2>通知</h2>
       <div id="notifications" role="list"></div>
@@ -152,6 +150,6 @@
   </main>
   <script src="lib/xterm.min.js"></script>
   <script src="lib/xterm-addon-fit.min.js"></script>
-  <script type="module" src="cmux.mjs"></script>
+  <script type="module" src="cmux.mjs?v=20261024-auto-scroll"></script>
 </body>
 </html>

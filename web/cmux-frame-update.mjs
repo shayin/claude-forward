@@ -1,5 +1,10 @@
 // 全屏 TUI 只有当前网格，没有可供本地预读的历史；相邻快照只重画变化行。
 // 非全屏/切屏/尺寸变化仍交给调用方完整重建，避免污染普通屏的历史缓冲。
+export function sameRenderedFrame(previous, next, columns, rows) {
+  return previous?.content === next.content && previous?.mouseScroll === next.mouseScroll &&
+    columns === next.columns && rows === next.rows;
+}
+
 export function alternateFramePatch(previous, next) {
   if (!previous?.alternateScreen || !next?.alternateScreen ||
       previous.columns !== next.columns || previous.rows !== next.rows ||

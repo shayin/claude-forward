@@ -1,5 +1,5 @@
-import { renderGrid } from "./cmux-render.mjs";
-import { alternateFramePatch } from "./cmux-frame-update.mjs";
+import { renderGrid } from "./cmux-render.mjs?v=20261024-auto-scroll";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-auto-scroll";
 import { createCmuxActivePoll } from "./cmux-active-poll.mjs";
 import { createCmuxFrameOrder } from "./cmux-frame-order.mjs";
 import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs";
@@ -17,7 +17,7 @@ import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
-import { mountCmuxScroll } from "./cmux-scroll.mjs";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-auto-scroll";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -82,9 +82,6 @@ let workspaces = [];
 let groups = [];
 const programs = new Map();
 let unreadOnly = localStorage.getItem("cf_cmux_unread_only") === "1";
-let remoteScrollEnabled = localStorage.getItem("cf_cmux_remote_scroll") === "1";
-const remoteScrollCheckbox = document.getElementById("remoteScrollEnabled");
-remoteScrollCheckbox.checked = remoteScrollEnabled;
 let pollTimer;
 let listTimer;
 let notificationTimer;
@@ -123,15 +120,15 @@ const scrollController = mountCmuxScroll({
   element: terminalElement,
   terminal,
   isSelected: () => Boolean(selectedSurface && !terminalPane.hidden),
-  canRemoteScroll: () => Boolean(remoteScrollEnabled && inputOwned && selectedSurface && !terminalPane.hidden),
-  remoteTouchEnabled: () => remoteScrollEnabled,
+  canRemoteScroll: () => Boolean(inputOwned && selectedSurface && !terminalPane.hidden &&
+    lastGridFrame?.mouseScroll),
   sendRemoteScroll: async lines => {
     const client = activeClient, workspace = selectedWorkspace, surface = selectedSurface;
     const epoch = sessionEpoch, sequence = frameOrder.issue();
     const result = await request("scroll", {
       workspace_id: workspace, surface_id: surface, delta_lines: lines
     });
-    if (remoteScrollEnabled && client === activeClient && workspace === selectedWorkspace &&
+    if (client === activeClient && workspace === selectedWorkspace &&
         surface === selectedSurface && epoch === sessionEpoch) {
       if (result?.render_grid) applySnapshot(result, workspace, surface, epoch, sequence);
       else void refreshSnapshot(true);
@@ -824,8 +821,8 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
   if (result?.render_grid) {
     const frame = renderGrid(result.render_grid);
     scrollController.setAlternateScreen(frame.alternateScreen);
-    if (frame.content === lastFrame && terminal.cols === frame.columns &&
-        terminal.rows === frame.rows) return;
+    if (lastGridFrame?.mouseScroll && !frame.mouseScroll) scrollController.cancelRemote();
+    if (sameRenderedFrame(lastGridFrame, frame, terminal.cols, terminal.rows)) return;
     const scrollOffset = terminal.buffer.active.baseY - terminal.buffer.active.viewportY;
     const followLatest = shouldFollowLatest(terminalElement, frame.alternateScreen,
       scrollController.isBrowsing());
@@ -1063,18 +1060,6 @@ unreadOnlyElement.addEventListener("change", () => {
   unreadOnly = unreadOnlyElement.checked;
   localStorage.setItem("cf_cmux_unread_only", unreadOnly ? "1" : "0");
   renderWorkspaces();
-});
-remoteScrollCheckbox.addEventListener("change", () => {
-  remoteScrollEnabled = remoteScrollCheckbox.checked;
-  localStorage.setItem("cf_cmux_remote_scroll", remoteScrollEnabled ? "1" : "0");
-  scrollController.reset();
-  scrollController.setAlternateScreen(lastGridFrame?.alternateScreen === true);
-  if (remoteScrollEnabled && lastGridFrame?.alternateScreen) {
-    showLatestScreen(terminalElement);
-    void refreshSnapshot(true);
-  } else {
-    scrollController.restoreBrowsing();
-  }
 });
 nextUnreadButton.addEventListener("click", () => {
   const next = nextUnreadWorkspace(workspaces, selectedWorkspace);

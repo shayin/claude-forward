@@ -24,7 +24,6 @@ button:hover, button:focus-visible { border-color: #80a8e9; }
 .workspace { display: block; width: 100%; text-align: left; margin: 6px 0; padding: 11px; }
 .workspace-filter { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
 .workspace-filter button { padding: 5px; }
-.remote-scroll-setting { display: flex; gap: 6px; align-items: flex-start; margin: 9px 0; font-size: 12px; color: #aeb9cc; }
 .workspace.active { background: #274672; border-color: #72adf4; }
 .workspace small { display: block; color: #aeb9cc; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; }
 .workspace-group { border-top: 1px solid #364052; padding: 8px 0; }
