@@ -3,7 +3,12 @@
 body { margin: 0; background: #191d27; color: #e6e9f2; }
 header { display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 18px; border-bottom: 1px solid #333a4d; }
 header a { color: #8cb9ef; text-decoration: none; }
-header #status { margin-left: auto; color: #aeb9cc; font-size: 13px; }
+.connection-status { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; min-width: 0; }
+header #status { color: #aeb9cc; font-size: 13px; }
+.status-indicator { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: #8390a5; }
+.status-indicator[data-state="ready"] { background: #4daf7a; box-shadow: 0 0 0 3px #4daf7a24; }
+.status-indicator[data-state="connecting"] { background: #d9a750; }
+.status-indicator[data-state="unavailable"] { background: #e37777; }
 #sidebarToggle { display: none; }
 main { display: flex; height: calc(100dvh - 56px); min-height: 320px; }
 aside { width: min(300px, 35vw); overflow: auto; padding: 16px; border-right: 1px solid #333a4d; }

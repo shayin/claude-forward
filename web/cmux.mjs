@@ -10,8 +10,10 @@ import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cm
 import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs";
 import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
+import { setConnectionIndicator } from "./cmux-status.mjs";
 
 const status = document.getElementById("status");
+const statusIndicator = document.getElementById("statusIndicator");
 const clientsSelect = document.getElementById("clientSelect");
 const workspacesElement = document.getElementById("workspaces");
 const unreadOnlyElement = document.getElementById("unreadOnly");
@@ -41,6 +43,7 @@ const viewportFit = new window.FitAddon.FitAddon();
 terminal.loadAddon(viewportFit);
 
 let socket;
+let clientDiscoveryTimer;
 let requestNumber = 0;
 let listRequestVersion = 0;
 let selectedClient = localStorage.getItem("cf_cmux_client") || "";
@@ -231,6 +234,10 @@ function loadDraft() {
 }
 
 function showStatus(message) { status.textContent = message; }
+function connectionState(state, message) {
+  setConnectionIndicator(statusIndicator, state);
+  showStatus(message);
+}
 
 function send(message) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -308,10 +315,15 @@ function renderClients(clientList) {
     clientsSelect.add(new Option(client.name || client.id, client.id));
   }
   if (!available.length) {
-    showStatus("没有启用 cmux 的 CF Client");
+    connectionState("unavailable", "终端模式未就绪，等待电脑连接");
     return;
   }
-  const client = available.find(item => item.id === selectedClient) || available[0];
+  const client = available.find(item => item.id === selectedClient) ||
+    (selectedClient ? null : available[0]);
+  if (!client) {
+    connectionState("unavailable", "所选 Client 已离线，等待重新连接");
+    return;
+  }
   selectedClient = client.id;
   selectedClientPath = client.path || "";
   clientsSelect.value = selectedClient;
@@ -647,6 +659,9 @@ async function refreshWorkspaces() {
       lastFrame = "";
     }
   }
+  if (statusIndicator.dataset.state !== "ready") {
+    connectionState("ready", "终端模式已连接");
+  }
 }
 
 async function refreshSnapshot() {
@@ -713,15 +728,22 @@ function connect() {
   const server = localStorage.getItem("cf_server");
   const token = localStorage.getItem("cf_token");
   if (!server || !token) {
-    showStatus("请先返回原有页面填写 CF 地址和 Token");
+    connectionState("unavailable", "请先返回原有页面填写 CF 地址和 Token");
     return;
   }
+  connectionState("connecting", "连接中…");
   const url = `${server.replace(/\/+$/, "")}/ws?token=${encodeURIComponent(token)}`;
   const channel = new WebSocket(url);
   socket = channel;
   channel.onopen = () => {
-    showStatus("已连接，查找 cmux Client");
+    connectionState("connecting", "已连接，查找电脑终端");
     send({ type: "list" });
+    clearInterval(clientDiscoveryTimer);
+    clientDiscoveryTimer = setInterval(() => {
+      if (!activeClient && socket === channel && channel.readyState === WebSocket.OPEN) {
+        send({ type: "list" });
+      }
+    }, 5000);
   };
   channel.onmessage = event => {
     let message;
@@ -733,11 +755,12 @@ function connect() {
       case "cmux_attached":
         if (message.payload?.client_id !== selectedClient) break;
         activeClient = selectedClient;
+        clearInterval(clientDiscoveryTimer);
         setInputState(false);
         setAdminState(false);
         claimAdmin();
-        showStatus("已连接到电脑上的 cmux");
-        void refreshWorkspaces().catch(error => showStatus(error.message));
+        connectionState("connecting", "正在检查电脑终端");
+        void refreshWorkspaces().catch(error => connectionState("unavailable", error.message));
         void refreshNotifications().catch(error => showStatus(error.message));
         void fileView.refreshRoots();
         clearInterval(pollTimer);
@@ -746,7 +769,8 @@ function connect() {
         clearInterval(claimTimer);
         clearInterval(adminTimer);
         pollTimer = setInterval(() => void refreshSnapshot(), 1200);
-        listTimer = setInterval(() => void refreshWorkspaces().catch(error => showStatus(error.message)), 5000);
+        listTimer = setInterval(() => void refreshWorkspaces()
+          .catch(error => connectionState("unavailable", error.message)), 5000);
         notificationTimer = setInterval(() =>
           void refreshNotifications().catch(error => showStatus(error.message)), 8000);
         claimTimer = setInterval(() => {
@@ -811,7 +835,7 @@ function connect() {
         browserView.reset();
         sessionEpoch += 1;
         clearPending("Client 已离线");
-        showStatus("Client 已离线");
+        connectionState("unavailable", "Client 已离线，等待重新连接");
         clearInterval(pollTimer);
         clearInterval(listTimer);
         clearInterval(notificationTimer);
@@ -819,13 +843,18 @@ function connect() {
         clearInterval(adminTimer);
         clearTimeout(eventTimer);
         eventTimer = null;
+        send({ type: "list" });
+        clientDiscoveryTimer = setInterval(() => {
+          if (!activeClient && channel.readyState === WebSocket.OPEN) send({ type: "list" });
+        }, 5000);
         break;
       case "error":
-        showStatus(message.payload?.message || "连接错误");
+        if (!activeClient) connectionState("unavailable", message.payload?.message || "连接错误");
+        else showStatus(message.payload?.message || "连接错误");
         break;
     }
   };
-  channel.onerror = () => showStatus("CF WebSocket 连接失败");
+  channel.onerror = () => connectionState("unavailable", "CF WebSocket 连接失败");
   channel.onclose = () => {
     if (socket !== channel || stopped) return;
     activeClient = "";
@@ -833,7 +862,8 @@ function connect() {
     setAdminState(false);
     browserView.reset();
     sessionEpoch += 1;
-    showStatus("连接中断，正在重连…");
+    connectionState("connecting", "连接中断，正在重连…");
+    clearInterval(clientDiscoveryTimer);
     clearInterval(pollTimer);
     clearInterval(listTimer);
     clearInterval(notificationTimer);
@@ -1007,6 +1037,7 @@ window.addEventListener("pagehide", () => {
   clearAttachmentPreview();
   clearTimeout(viewportTimer);
   clearInterval(pollTimer);
+  clearInterval(clientDiscoveryTimer);
   clearInterval(listTimer);
   clearInterval(notificationTimer);
   clearInterval(claimTimer);

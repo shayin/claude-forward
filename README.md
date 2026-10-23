@@ -163,9 +163,30 @@ cmux:
 版本只允许由 cmux 终端启动的进程访问 socket；此时须在 **cmux 自带终端**
 中启动配置了此选项的 CF Client，不能放宽系统 socket 权限。回到 CF Web
 原聊天页，在已连接且支持 cmux 的 Client 旁选择「终端模式」；可随时返回原聊天。
+Client 列表的状态圆点区分「终端模式入口可用」「Client 在线但未提供终端模式」
+和「Client 未连接」。进入终端模式后，页头圆点根据电脑端工作区读取结果显示
+连接中、可用或不可用；离线时页面会自动重试发现 Client。
 工作区启动 Claude Code/Codex 时使用本机真实 CLI 及其原有权限配置，
 **不会沿用聊天模式的自动跳过权限参数或公司 TPP 登录**。如果本机 CLI
 已配置自动允许，网页也不会额外制造审批弹窗。
+
+macOS 可以为当前用户启用**登录后自动启动**（无需在 shell 配置中保存 Token）：
+
+```bash
+make build-client
+make install-client
+./deploy/macos/install-cmux-autostart.sh "/absolute/path/to/your/project"
+```
+
+安装器仅添加用户级 LaunchAgent，让登录时打开 cmux；cmux 内 zsh 启动时
+再运行 CF Client。由于 cmux 限制 socket 访问，不能把 Client 本身直接
+放进普通 LaunchAgent。安装器会先备份 `~/.zshrc`，只附加一段标记明确的
+cmux 条件钩子；重复安装不会重复追加。运行日志在
+`~/.claude-forward/cmux-client.log`。原聊天入口和旧版 tmux 配置不变。
+若 cmux 启动后没有任何终端 shell，请在 cmux 内新建一个终端；钩子会
+在该 shell 启动时运行。要停用自启，可移除 `.zshrc` 中对应的标记块，
+运行 `launchctl bootout gui/$(id -u)/com.claude-forward.cmux-autostart`
+并删除 `~/Library/LaunchAgents/com.claude-forward.cmux-autostart.plist`。
 CF 现有 Token 是全局管理凭据，持有人可连接所有已注册的 Client；
 不要把 Web Token 当成只读或按工作区隔离的凭据分发。
 

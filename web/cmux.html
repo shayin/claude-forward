@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Claude Forward · 终端模式</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="lib/xterm.css">
   <link rel="stylesheet" href="cmux.css">
 </head>
@@ -12,7 +13,7 @@
     <a href="./" aria-label="返回原有聊天">← 原有聊天</a>
     <button id="sidebarToggle" type="button" aria-controls="cmuxSidebar" aria-expanded="false">☰ 工作区</button>
     <strong>Claude Forward · 终端模式</strong>
-    <span id="status" role="status">连接中…</span>
+    <span class="connection-status"><span id="statusIndicator" class="status-indicator" data-state="connecting" aria-hidden="true"></span><span id="status" role="status">连接中…</span></span>
   </header>
   <div id="sidebarScrim" hidden></div>
   <main>

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Claude Forward</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <script>(function(){var t=localStorage.getItem('cf_theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.setAttribute('data-theme','dark')}})();</script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
@@ -515,6 +516,27 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+
+        .client-availability {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 5px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .client-availability::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-placeholder);
+            flex-shrink: 0;
+        }
+
+        .client-availability.ready::before { background: var(--status-connected); }
+        .client-availability.basic::before { background: var(--status-connecting); }
 
         .client-arrow {
             color: var(--text-placeholder);
@@ -1418,6 +1440,7 @@
                 case 'list':
                     showView('clientListView');
                     showClients(msg.payload.clients);
+                    startPollingForClient();
                     break;
                 case 'attached':
                     localStorage.setItem('cf_attached_client', attachedClient);
@@ -1643,9 +1666,10 @@
 
         // 轮询等待客户端上线
         function startPollingForClient() {
-            stopPollingForClient();
+            if (pollTimer) return;
             pollTimer = setInterval(() => {
-                if (waitingForClient && ws && ws.readyState === WebSocket.OPEN) {
+                if (ws && ws.readyState === WebSocket.OPEN &&
+                    (waitingForClient || document.getElementById('clientListView').classList.contains('active'))) {
                     sendMessage({ type: 'list' });
                 } else {
                     stopPollingForClient();
@@ -1664,7 +1688,7 @@
             const container = document.getElementById('clients');
             availableClients = clients || [];
             if (!clients || clients.length === 0) {
-                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128187;</div><h2>没有可用的客户端</h2><p>请确保本地客户端已启动</p></div>';
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128187;</div><h2>没有可用的客户端</h2><p>⚪ 客户端未连接，终端模式暂不可用</p></div>';
                 return;
             }
 
@@ -1698,11 +1722,16 @@
                     detail.textContent = value;
                     info.append(detail);
                 }
+                const terminalReady = Array.isArray(c.features) && c.features.includes('cmux');
+                const availability = document.createElement('div');
+                availability.className = `client-availability ${terminalReady ? 'ready' : 'basic'}`;
+                availability.textContent = terminalReady ? '终端模式入口可用' : '客户端在线 · 未提供终端模式';
+                info.append(availability);
                 const arrow = document.createElement('span');
                 arrow.className = 'client-arrow';
                 arrow.textContent = '›';
                 item.append(icon, info, arrow);
-                if (Array.isArray(c.features) && c.features.includes('cmux')) {
+                if (terminalReady) {
                     const button = document.createElement('button');
                     button.className = 'btn-ghost';
                     button.type = 'button';
