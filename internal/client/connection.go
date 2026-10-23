@@ -26,6 +26,8 @@ type Client struct {
 	conn          *websocket.Conn
 	send          chan *protocol.Message
 	tmux          *TmuxManager
+	cmux          *CmuxManager
+	cmuxQueue     *cmuxRequestQueue
 	claude        *ClaudeManager
 	codex         *CodexManager // codex CLI 引擎（bot 通道可选）
 	botEngine     string        // bot 通道当前引擎："claude"（默认）| "codex"
@@ -111,12 +113,19 @@ func (c *backgroundTextCollector) text() string {
 // NewClient 创建客户端
 func NewClient(config *Config) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Client{
+	client := &Client{
 		config: config,
 		send:   make(chan *protocol.Message, 256),
 		ctx:    ctx,
 		cancel: cancel,
 	}
+	if config.Cmux.Enabled {
+		cmuxConfig := config.Cmux
+		cmuxConfig.ShareRoot = config.HTMLShare.RootDir
+		client.cmux = NewCmuxManager(cmuxConfig)
+		client.cmuxQueue = newCmuxRequestQueue(client)
+	}
+	return client
 }
 
 // Connect 连接到服务器
@@ -152,6 +161,10 @@ func (c *Client) Connect() error {
 	}
 
 	c.conn = conn
+	if c.cmux != nil {
+		// 旧连接队列的上下文已经取消；不能让新连接沿用旧的请求车道。
+		c.cmuxQueue = newCmuxRequestQueue(c)
+	}
 
 	// 注册
 	registerMsg, _ := protocol.NewMessage(protocol.TypeRegister, protocol.RegisterPayload{
@@ -161,12 +174,17 @@ func (c *Client) Connect() error {
 		ClawbotID:   c.config.Client.ClawbotID,
 		PID:         os.Getpid(),
 		Path:        c.config.Path,
+		Features:    c.optionalFeatures(),
 	})
 	c.send <- registerMsg
 
 	// 启动读写协程
 	go c.readPump()
 	go c.writePump()
+	if c.cmux != nil {
+		go c.watchCmuxEvents(c.ctx)
+		go c.cmux.pruneUploadsUntilDone(c.ctx)
+	}
 
 	log.Printf("Connected to server: %s", url)
 
@@ -189,6 +207,9 @@ func (c *Client) Disconnect() {
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
+	}
+	if c.cmux != nil {
+		c.cmux.closeUploads()
 	}
 }
 
@@ -384,6 +405,26 @@ func (c *Client) handleMessage(msg *protocol.Message) {
 	switch msg.Type {
 	case protocol.TypeAck:
 		log.Printf("Registered successfully")
+
+	case protocol.TypeCmuxRequest:
+		if c.cmux != nil {
+			c.cmuxQueue.enqueue(msg)
+		} else {
+			var request protocol.CmuxRequestPayload
+			if msg.ParsePayload(&request) == nil {
+				response, _ := protocol.NewMessage(protocol.TypeCmuxResponse,
+					protocol.CmuxResponsePayload{RequestID: request.RequestID, Error: "cmux disabled"})
+				response.To = msg.From
+				c.send <- response
+			}
+		}
+	case protocol.TypeCmuxOwnership:
+		if c.cmuxQueue != nil {
+			var change protocol.CmuxOwnershipPayload
+			if msg.ParsePayload(&change) == nil {
+				c.cmuxQueue.updateOwner(change)
+			}
+		}
 
 	case protocol.TypeAttach:
 		// 用户请求连接

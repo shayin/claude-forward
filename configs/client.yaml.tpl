@@ -14,6 +14,14 @@ tmux:
   auto_start: true                    # 是否自动创建 tmux session
   shell: ""                           # 默认 shell，留空使用系统默认
 
+# 云桥终端（独立于聊天及旧 tmux，默认关闭）
+# 仅连接当前用户的 cmux socket；若 cmux 拒绝外部进程连接，应在获授权的
+# 运行环境中启动 CF Client，不要通过放宽 cmux 权限来绕过限制。
+cmux:
+  enabled: false
+  socket_path: ""                     # 留空按 cmux 的 last-socket-path 自动发现
+  file_roots: []                      # 文件管理只开放列出的绝对目录（可用 ~/ 前缀），默认关闭
+
 # Claude 聊天模式配置
 claude:
   path: ""                            # claude 二进制路径，留空默认使用 PATH 中的 claude

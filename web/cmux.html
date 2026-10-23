@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Claude Forward · 云桥终端</title>
+  <link rel="stylesheet" href="lib/xterm.css">
+  <link rel="stylesheet" href="cmux.css">
+</head>
+<body>
+  <header>
+    <a href="./" aria-label="返回原有聊天">← 原有聊天</a>
+    <button id="sidebarToggle" type="button" aria-controls="cmuxSidebar" aria-expanded="false">☰ 工作区</button>
+    <strong>Claude Forward · 云桥终端</strong>
+    <span id="status" role="status">连接中…</span>
+  </header>
+  <div id="sidebarScrim" hidden></div>
+  <main>
+    <aside id="cmuxSidebar">
+      <label for="clientSelect">本机 Client</label>
+      <select id="clientSelect"><option value="">选择 Client</option></select>
+      <div class="admin-ownership">
+        <span id="adminStatus">管理权未取得</span>
+        <button id="adminTakeoverButton" type="button" hidden>接管管理</button>
+      </div>
+      <h2>工作区 <span><button id="workspaceButton" type="button">新建</button>
+        <button id="groupButton" type="button">建分组</button>
+        <button id="refreshButton" type="button">刷新</button></span></h2>
+      <label for="workspaceProfile">新建时启动</label>
+      <select id="workspaceProfile">
+        <option value="">空终端（默认 Shell）</option>
+        <option value="claude">Claude Code（原生审批）</option>
+        <option value="codex">Codex（原生审批）</option>
+      </select>
+      <div class="workspace-filter">
+        <label><input id="unreadOnly" type="checkbox"> 仅看未读</label>
+        <button id="nextUnreadButton" type="button">下一未读</button>
+      </div>
+      <div id="workspaces" role="list"></div>
+      <h2>通知</h2>
+      <div id="notifications" role="list"></div>
+      <h2>文件 <button id="filesToggleButton" type="button">浏览</button></h2>
+      <h2>网页服务 <button id="browserToggleButton" type="button">预览</button></h2>
+    </aside>
+    <section id="terminalPane" class="terminal-pane">
+      <div id="terminalTitle">选择一个工作区</div>
+      <div id="programStatus" role="status" hidden></div>
+      <div class="input-ownership">
+        <span id="inputStatus">选择终端后检查输入权</span>
+        <button id="takeoverButton" type="button" hidden>接管输入</button>
+      </div>
+      <nav id="terminalTabs" aria-label="终端标签页"></nav>
+      <div class="tab-actions"><button id="newTabButton" type="button">新建终端 tab</button></div>
+      <div id="terminal"></div>
+      <div class="keys" aria-label="终端快捷键">
+        <button type="button" data-key="escape">Esc</button>
+        <button type="button" data-key="ctrl+c">Ctrl+C</button>
+        <button type="button" data-key="up">↑</button>
+        <button type="button" data-key="down">↓</button>
+        <button type="button" data-key="left">←</button>
+        <button type="button" data-key="right">→</button>
+        <button type="button" data-key="tab">Tab</button>
+        <button type="button" data-key="return">Enter</button>
+      </div>
+      <form id="promptForm">
+        <textarea id="prompt" placeholder="输入后发送到电脑上的真实终端" rows="2"></textarea>
+        <button type="submit">发送</button>
+      </form>
+      <div class="upload-controls">
+        <label>附件（最多 8 个，每个不超过 20 MiB）<input id="terminalFiles" type="file" multiple></label>
+        <button id="uploadAttachmentsButton" type="button">上传到当前终端草稿</button>
+        <div id="attachmentPreview" aria-live="polite"></div>
+      </div>
+    </section>
+    <section id="filePane" class="file-pane" hidden>
+      <div class="file-toolbar">
+        <button id="filesBackButton" type="button">← 终端</button>
+        <select id="fileRootSelect" aria-label="开放的文件根目录"></select>
+        <button id="fileUpButton" type="button">上一级</button>
+        <button id="fileRecentButton" type="button">最近文件</button>
+        <button id="fileRefreshButton" type="button">刷新</button>
+        <label><input id="fileAutoRefresh" type="checkbox" checked> 自动刷新预览</label>
+      </div>
+      <label class="file-search">当前目录搜索 <input id="fileSearch" type="search" placeholder="按文件名筛选"></label>
+      <div id="fileStatus" role="status">仅浏览 Client 明确开放的目录</div>
+      <div class="upload-controls">
+        <label>上传到当前目录 <input id="fileUploadInput" type="file" multiple></label>
+        <button id="fileUploadButton" type="button">上传文件</button>
+      </div>
+      <div id="fileEntries" role="list"></div>
+      <button id="fileMoreButton" type="button" hidden>加载更多</button>
+      <div id="filePreview" hidden>
+        <div id="filePreviewHeader"></div>
+        <pre id="fileText" hidden></pre>
+        <img id="fileImage" alt="文件图片预览" hidden>
+        <iframe id="fileFrame" title="隔离的文件预览" sandbox="" referrerpolicy="no-referrer" hidden></iframe>
+      </div>
+    </section>
+    <section id="browserPane" class="browser-pane" hidden>
+      <div class="browser-toolbar">
+        <button id="browserBackToTerminal" type="button">← 终端</button>
+        <select id="browserPort" aria-label="当前工作区侦测到的本机端口"></select>
+        <input id="browserPath" type="text" value="/" aria-label="网页路径" maxlength="2048">
+        <button id="browserOpen" type="button">打开</button>
+        <button id="browserRefresh" type="button">刷新画面</button>
+      </div>
+      <div class="browser-toolbar">
+        <button data-browser-nav="back" type="button">后退</button>
+        <button data-browser-nav="forward" type="button">前进</button>
+        <button data-browser-nav="reload" type="button">重载</button>
+        <label><input id="browserAuto" type="checkbox" checked> 自动刷新画面</label>
+      </div>
+      <div id="browserStatus" role="status">初始入口限当前工作区的本机端口；网页脚本可能跳转，仅管理设备可预览</div>
+      <div id="browserStage"><img id="browserImage" alt="本机 cmux 浏览器的网页截图" draggable="false"></div>
+      <div class="browser-toolbar">
+        <input id="browserText" type="text" placeholder="向网页输入文字" aria-label="向本机网页输入文字">
+        <button id="browserSendText" type="button">输入</button>
+        <button data-browser-key="Enter" type="button">Enter</button>
+        <button data-browser-key="Escape" type="button">Esc</button>
+        <button data-browser-key="Backspace" type="button">退格</button>
+        <button data-browser-key="Tab" type="button">Tab</button>
+      </div>
+    </section>
+  </main>
+  <script src="lib/xterm.min.js"></script>
+  <script src="lib/xterm-addon-fit.min.js"></script>
+  <script type="module" src="cmux.mjs"></script>
+</body>
+</html>

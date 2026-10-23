@@ -41,6 +41,7 @@
 | 会话恢复 | 断线重连自动恢复，支持 Claude `--resume` |
 | 费用统计 | 实时显示每轮 Token 用量 |
 | 终端模式 | tmux + xterm.js 完整终端转发（可选） |
+| 云桥终端 | Web 页面可切换到真实 cmux 工作区、终端、文件与本机网页预览（可选，独立于原聊天） |
 | 手机优化 | 适配 iOS Safari，安全区域适配 |
 | 安全 | Token 认证 + TLS 加密 + 自签名证书（无需域名） |
 
@@ -145,6 +146,33 @@ tmux:
   session_name: ""          # 留空自动推导为 cf-basename
   auto_start: true
 ```
+
+### 云桥终端（真实 cmux，可选）
+
+电脑须安装并运行 cmux。Client 的配置可增加：
+
+```yaml
+cmux:
+  enabled: true
+  socket_path: ""           # 留空发现当前 cmux socket
+  file_roots:
+    - "/absolute/path/to/your/projects" # 仅开放明确指定的目录；留空即关闭文件管理
+```
+
+默认关闭，旧聊天、微信/飞书及原 tmux 模式不会切换到 cmux。某些 cmux
+版本只允许由 cmux 终端启动的进程访问 socket；此时须在 **cmux 自带终端**
+中启动配置了此选项的 CF Client，不能放宽系统 socket 权限。回到 CF Web
+原聊天页，在已连接且支持 cmux 的 Client 旁选择「云桥终端」；可随时返回原聊天。
+工作区启动 Claude Code/Codex 时使用本机真实 CLI 及其原有权限配置，
+**不会沿用聊天模式的自动跳过权限参数或公司 TPP 登录**。如果本机 CLI
+已配置自动允许，网页也不会额外制造审批弹窗。
+CF 现有 Token 是全局管理凭据，持有人可连接所有已注册的 Client；
+不要把 Web Token 当成只读或按工作区隔离的凭据分发。
+
+文件读写仅限 `file_roots` 内的普通文件，不跟随软链接；文件上传需要网页
+管理权。Markdown/HTML 为禁脚本的静态隔离预览，需交互的本机网页服务
+使用独立的「网页服务预览」。下载走有大小上限的逐片流，既有 HTML 分享
+目录及令牌不参与此功能。
 
 ### 本地 HTML 分享
 

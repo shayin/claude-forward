@@ -118,6 +118,8 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte(buildInfo))
 	})
+	http.HandleFunc("/api/cmux-download", handler.HandleCmuxDownload)
+	http.HandleFunc("/api/cmux-download/", handler.HandleCmuxDownload)
 
 	// 静态文件服务（带 gzip 压缩）
 	fs := http.FileServer(http.Dir("web"))

@@ -15,10 +15,19 @@ type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Client    ClientConfig    `yaml:"client"`
 	Tmux      TmuxConfig      `yaml:"tmux"`
+	Cmux      CmuxConfig      `yaml:"cmux"`
 	Claude    ClaudeConfig    `yaml:"claude"`
 	Codex     CodexConfig     `yaml:"codex"`
 	HTMLShare HTMLShareConfig `yaml:"html_share"`
 	Path      string          // 工作目录（运行时推导，不来自配置文件）
+}
+
+// CmuxConfig 仅启用本机已有 cmux；不会启动新进程或更改 cmux 配置。
+type CmuxConfig struct {
+	Enabled    bool     `yaml:"enabled"`
+	SocketPath string   `yaml:"socket_path"`
+	FileRoots  []string `yaml:"file_roots"` // 显式开放的目录；留空时文件管理不可用
+	ShareRoot  string   `yaml:"-"`          // 运行时传入 HTML 分享根，用于拒绝上传到公开目录
 }
 
 // HTMLShareConfig 配置经云端反向代理对外分享的本地静态目录。

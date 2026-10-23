@@ -1168,6 +1168,7 @@
         // === State ===
         let ws = null;
         let attachedClient = null;
+        let availableClients = [];
         let isReconnecting = false;
         let reconnectTimer = null;
         let isStreaming = false;
@@ -1661,6 +1662,7 @@
 
         function showClients(clients) {
             const container = document.getElementById('clients');
+            availableClients = clients || [];
             if (!clients || clients.length === 0) {
                 container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128187;</div><h2>没有可用的客户端</h2><p>请确保本地客户端已启动</p></div>';
                 return;
@@ -1677,17 +1679,43 @@
                 }
             }
 
-            container.innerHTML = clients.map(c => `
-                <div class="client-item ${attachedClient === c.id ? 'active' : ''}" onclick="attach('${c.id}')">
-                    <div class="client-icon">&#128187;</div>
-                    <div class="client-info">
-                        <div class="client-name">${c.name || c.id}</div>
-                        <div class="client-meta">PID: ${c.pid || '-'}</div>
-                        <div class="client-path">${c.path || ''}</div>
-                    </div>
-                    <span class="client-arrow">&#8250;</span>
-                </div>
-            `).join('');
+            const items = clients.map((c, index) => {
+                const item = document.createElement('div');
+                item.className = `client-item ${attachedClient === c.id ? 'active' : ''}`;
+                item.addEventListener('click', () => attach(c.id));
+                const icon = document.createElement('div');
+                icon.className = 'client-icon';
+                icon.textContent = '💻';
+                const info = document.createElement('div');
+                info.className = 'client-info';
+                for (const [className, value] of [
+                    ['client-name', c.name || c.id],
+                    ['client-meta', `PID: ${c.pid || '-'}`],
+                    ['client-path', c.path || '']
+                ]) {
+                    const detail = document.createElement('div');
+                    detail.className = className;
+                    detail.textContent = value;
+                    info.append(detail);
+                }
+                const arrow = document.createElement('span');
+                arrow.className = 'client-arrow';
+                arrow.textContent = '›';
+                item.append(icon, info, arrow);
+                if (Array.isArray(c.features) && c.features.includes('cmux')) {
+                    const button = document.createElement('button');
+                    button.className = 'btn-ghost';
+                    button.type = 'button';
+                    button.textContent = '云桥终端';
+                    button.addEventListener('click', event => {
+                        event.stopPropagation();
+                        openCmuxPage(index);
+                    });
+                    item.append(button);
+                }
+                return item;
+            });
+            container.replaceChildren(...items);
         }
 
         function createMessageEl(role, text) {
@@ -2031,6 +2059,14 @@
                 permissionCountdownInterval = null;
             }
             currentPermissionRequest = null;
+        }
+
+        // 独立入口只复用 CF 连接信息，不触发旧 attach/tmux 或聊天审批逻辑。
+        function openCmuxPage(index) {
+            const client = availableClients[index];
+            if (!client || !Array.isArray(client.features) || !client.features.includes('cmux')) return;
+            localStorage.setItem('cf_cmux_client', client.id);
+            window.location.assign('cmux.html');
         }
 
         // === Start ===

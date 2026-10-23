@@ -41,6 +41,7 @@ type Handler struct {
 	bgPushed      map[string]int64 // taskID → 推送时间(UnixMilli)，LRU 去重防断线堆积重连洪泛
 	bgPushedPath  string           // 已推送任务 ID 的持久化状态，跨服务端重启去重
 	shareBroker   *shareRequestBroker
+	cmuxDownloads *cmuxDownloadBroker
 }
 
 // NewHandler 创建处理器
@@ -51,6 +52,7 @@ func NewHandler(hub *Hub, auth *Auth, encryptionKey []byte) *Handler {
 		encryptionKey: encryptionKey,
 		bgPushed:      make(map[string]int64),
 		shareBroker:   newShareRequestBroker(),
+		cmuxDownloads: newCmuxDownloadBroker(),
 	}
 }
 
@@ -274,6 +276,24 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 	case protocol.TypeAttach:
 		h.handleAttach(conn, msg)
 
+	case protocol.TypeCmuxAttach:
+		h.handleCmuxAttach(conn, msg)
+
+	case protocol.TypeCmuxRequest:
+		h.handleCmuxRequest(conn, msg)
+
+	case protocol.TypeCmuxResponse:
+		h.handleCmuxResponse(conn, msg)
+
+	case protocol.TypeCmuxEvent:
+		h.handleCmuxEvent(conn, msg)
+
+	case protocol.TypeCmuxClaim:
+		h.handleCmuxClaim(conn, msg, false)
+
+	case protocol.TypeCmuxRelease:
+		h.handleCmuxClaim(conn, msg, true)
+
 	case protocol.TypeDetach:
 		h.handleDetach(conn)
 
@@ -352,6 +372,7 @@ func (h *Handler) handleRegister(conn *Connection, msg *protocol.Message) {
 	conn.ClawbotID = payload.ClawbotID
 	conn.PID = payload.PID
 	conn.Path = payload.Path
+	conn.Features = payload.Features
 
 	// 注册到 Hub
 	h.hub.RegisterClient(conn)
@@ -367,6 +388,104 @@ func (h *Handler) handleRegister(conn *Connection, msg *protocol.Message) {
 	}
 
 	log.Printf("Client registered: %s (%s)", payload.ID, payload.Name)
+}
+
+// handleCmuxAttach 只建立独立路由，不发送旧的 attach（旧 attach 会启动 tmux）。
+func (h *Handler) handleCmuxAttach(conn *Connection, msg *protocol.Message) {
+	if conn.Type != ConnTypeUser {
+		return
+	}
+	var payload protocol.AttachPayload
+	if err := msg.ParsePayload(&payload); err != nil || payload.ClientID == "" {
+		h.sendCmuxError(conn, "", "invalid cmux attach payload")
+		return
+	}
+	if !h.hub.AttachCmuxUser(conn.ID, payload.ClientID) {
+		h.sendCmuxError(conn, "", "cmux client unavailable")
+		return
+	}
+	conn.Send <- &protocol.Message{Type: protocol.TypeCmuxAttached,
+		Payload: mustMarshal(protocol.StatusPayload{ClientID: payload.ClientID, Online: true})}
+}
+
+func (h *Handler) handleCmuxRequest(conn *Connection, msg *protocol.Message) {
+	if conn.Type != ConnTypeUser {
+		return
+	}
+	var payload protocol.CmuxRequestPayload
+	if err := msg.ParsePayload(&payload); err != nil || protocol.ValidateCmuxRequest(payload) != nil {
+		h.sendCmuxError(conn, "", "invalid cmux request")
+		return
+	}
+	if !h.hub.ForwardCmuxRequest(conn.ID, payload, msg) {
+		h.sendCmuxError(conn, payload.RequestID, "cmux 请求被拒绝：未连接、没有输入权、重复或队列已满")
+	}
+}
+
+func (h *Handler) handleCmuxClaim(conn *Connection, msg *protocol.Message, release bool) {
+	if conn.Type != ConnTypeUser {
+		return
+	}
+	var payload protocol.CmuxClaimPayload
+	if err := msg.ParsePayload(&payload); err != nil || !protocol.ValidCmuxSurfaceID(payload.SurfaceID) {
+		conn.Send <- &protocol.Message{Type: protocol.TypeError,
+			Payload: mustMarshal(protocol.ErrorPayload{Code: 400, Message: "invalid cmux surface"})}
+		return
+	}
+	var state protocol.CmuxClaimedPayload
+	var ok bool
+	if release {
+		state, ok = h.hub.ReleaseCmuxInput(conn.ID, payload.SurfaceID)
+	} else {
+		state, ok = h.hub.ClaimCmuxInput(conn.ID, payload.SurfaceID, payload.Force)
+	}
+	if !ok {
+		conn.Send <- &protocol.Message{Type: protocol.TypeError,
+			Payload: mustMarshal(protocol.ErrorPayload{Code: 403, Message: "cmux input unavailable"})}
+		return
+	}
+	conn.Send <- &protocol.Message{Type: protocol.TypeCmuxClaimed, Payload: mustMarshal(state)}
+}
+
+func (h *Handler) handleCmuxResponse(conn *Connection, msg *protocol.Message) {
+	if conn.Type != ConnTypeClient {
+		return
+	}
+	h.hub.DeliverCmuxResponse(conn, msg)
+}
+
+func (h *Handler) handleCmuxEvent(conn *Connection, msg *protocol.Message) {
+	if conn.Type != ConnTypeClient || !clientHasFeature(conn, "cmux") {
+		return
+	}
+	var event protocol.CmuxEventPayload
+	if len(msg.Payload) > 128<<10 {
+		return
+	}
+	if err := msg.ParsePayload(&event); err != nil ||
+		len(event.Category) > 64 || len(event.Name) > 128 ||
+		len(event.WorkspaceID) > 128 || len(event.SurfaceID) > 128 {
+		return
+	}
+	if event.Name == "program_status.changed" &&
+		protocol.ValidCmuxSurfaceID(event.WorkspaceID) &&
+		protocol.ValidCmuxSurfaceID(event.SurfaceID) {
+		event.Programs = protocol.CleanCmuxPrograms(event.Programs)
+		if event.Programs == nil {
+			event.Programs = []protocol.CmuxProgramRecord{}
+		}
+	} else {
+		event.Programs = nil
+	}
+	msg.From = conn.ID
+	msg.To = ""
+	msg.Payload = mustMarshal(event) // 去掉 Client 可能附带的原始敏感字段。
+	h.hub.BroadcastCmuxEvent(conn, msg)
+}
+
+func (h *Handler) sendCmuxError(conn *Connection, requestID, message string) {
+	conn.Send <- &protocol.Message{Type: protocol.TypeCmuxResponse,
+		Payload: mustMarshal(protocol.CmuxResponsePayload{RequestID: requestID, Error: message})}
 }
 
 // handleList 处理列表请求
