@@ -86,25 +86,17 @@ test("滚动中途显示回放画面，空闲时补最终画面，切换终端�
   assert.ok(begin > 0 && end > begin);
   let handlers;
   let pending = false;
-  let scrollResets = 0;
-  let hintResets = 0;
   const snapshots = [];
   const frames = [];
-  const relativeLines = [];
   const context = {
     terminalElement: {}, terminal: {}, terminalPane: { hidden: false },
-    mobileMedia: { matches: true },
-    relativeScrollHint: {
-      record: lines => relativeLines.push(lines),
-      reset: () => { hintResets++; }
-    },
     selectedSurface: "surface", selectedWorkspace: "workspace", activeClient: "client",
     inputOwned: true, lastGridFrame: { mouseScroll: true }, sessionEpoch: 1,
     remoteNeedsSnapshot: null,
     frameOrder: { issue: () => 1 },
     mountCmuxScroll: options => {
       handlers = options;
-      return { hasPendingRemote: () => pending, reset: () => { scrollResets++; } };
+      return { hasPendingRemote: () => pending };
     },
     request: async () => ({ scrolled: true }),
     refreshSnapshot: urgent => { snapshots.push(urgent); },
@@ -115,7 +107,6 @@ test("滚动中途显示回放画面，空闲时补最终画面，切换终端�
   pending = true;
   await handlers.sendRemoteScroll(-4);
   await handlers.sendRemoteScroll(-6);
-  assert.deepEqual(relativeLines, [-4, -6]);
   assert.equal(snapshots.length, 0);
   pending = false;
   handlers.onRemoteIdle();
@@ -129,19 +120,9 @@ test("滚动中途显示回放画面，空闲时补最终画面，切换终端�
   pending = false;
   handlers.onRemoteIdle();
   assert.deepEqual(snapshots, [true, true], "中途画面之后仍补读最终状态");
-  context.request = async () => { throw new Error("network"); };
-  await assert.rejects(handlers.sendRemoteScroll(-3), /network/);
-  assert.deepEqual(relativeLines, [-4, -6, -2], "失败的远程请求不计入相对量");
-  let finishStaleRequest;
-  context.request = () => new Promise(resolve => { finishStaleRequest = resolve; });
-  const staleRequest = handlers.sendRemoteScroll(-2);
+  context.request = async () => ({ scrolled: true });
+  await handlers.sendRemoteScroll(-2);
   context.selectedSurface = "other";
-  finishStaleRequest({ scrolled: true });
-  await staleRequest;
   handlers.onRemoteIdle();
   assert.equal(snapshots.length, 2);
-  assert.deepEqual(relativeLines, [-4, -6, -2], "切换后旧请求不得继续记入相对量");
-  vm.runInNewContext("resetScrollView()", context);
-  assert.equal(scrollResets, 1);
-  assert.equal(hintResets, 1, "切换终端时相对量必须一起归零");
 });

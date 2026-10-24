@@ -18,7 +18,6 @@ import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
 import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-touch-direction";
 import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-live-frame";
-import { createRelativeScrollHint } from "./cmux-relative-scroll.mjs";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -114,7 +113,6 @@ const selectedTabs = new Map();
 let composerSending = false;
 unreadOnlyElement.checked = unreadOnly;
 const pending = new Map();
-const relativeScrollHint = createRelativeScrollHint(document.getElementById("terminalScrollHint"));
 const scrollDiagnostic = createScrollDiagnostic({
   send: payload => {
     try {
@@ -142,7 +140,6 @@ const scrollController = mountCmuxScroll({
     });
     if (client === activeClient && workspace === selectedWorkspace &&
         surface === selectedSurface && epoch === sessionEpoch) {
-      if (mobileMedia.matches) relativeScrollHint.record(lines);
       if (result?.render_grid) {
         // 中途帧也可见；序号检查会拒绝比新快照更旧的画面。
         applySnapshot(result, workspace, surface, epoch, sequence);
@@ -171,17 +168,13 @@ const scrollController = mountCmuxScroll({
   onRemoteRequest: (ms, failed) => scrollDiagnostic.rpc(ms, failed),
   onReturnToBottom: () => void refreshSnapshot(true)
 });
-function resetScrollView() {
-  scrollController.reset();
-  relativeScrollHint.reset();
-}
 const fileView = mountCmuxFiles({
   request,
   currentClient: () => activeClient,
   canUpload: () => adminOwned,
   onShow: () => {
     browserView.hide(false);
-    resetScrollView();
+    scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
   onHide: () => { claimInput(); scheduleViewport(); }
@@ -193,7 +186,7 @@ const browserView = mountCmuxBrowser({
   canManage: () => adminOwned,
   onShow: () => {
     fileView.reset();
-    resetScrollView();
+    scrollController.reset();
     releaseInput(selectedSurface); setInputState(false);
   },
   onHide: () => { claimInput(); scheduleViewport(); }
@@ -450,7 +443,7 @@ function renderClients(clientList) {
 
 function attach() {
   if (!selectedClient) return;
-  resetScrollView();
+  scrollController.reset();
   fileView.reset();
   browserView.reset();
   clearAttachmentPreview();
@@ -685,7 +678,7 @@ function selectWorkspace(id) {
   if (!pendingPosition) scrollPositions.save(activeClient, selectedWorkspace, selectedSurface,
     lastGridFrame?.alternateScreen === true, terminalElement, terminal);
   pendingPosition = true;
-  resetScrollView();
+  scrollController.reset();
   saveDraft();
   const previousSelectedSurface = selectedSurface;
   const workspaceChanged = selectedWorkspace !== id;
@@ -728,7 +721,7 @@ function renderTabs(workspace) {
         lastGridFrame?.alternateScreen === true, terminalElement, terminal);
       pendingPosition = true;
       saveDraft();
-      resetScrollView();
+      scrollController.reset();
       const oldSurface = selectedSurface;
       selectedSurface = surface.id;
       if (oldSurface !== selectedSurface) {
@@ -797,7 +790,6 @@ async function refreshWorkspaces() {
     else {
       selectedWorkspace = "";
       selectedSurface = "";
-      relativeScrollHint.reset();
       updateWorkspaceShortcut();
       syncNewTabButtons();
       setInputState(false);
@@ -864,7 +856,6 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     const frame = renderGrid(result.render_grid);
     scrollDiagnostic.frame(performance.now() - renderStarted);
     scrollController.setAlternateScreen(frame.alternateScreen);
-    relativeScrollHint.setRemoteMode(frame.mouseScroll && mobileMedia.matches);
     if (lastGridFrame?.mouseScroll && !frame.mouseScroll) scrollController.cancelRemote();
     if (sameRenderedFrame(lastGridFrame, frame, terminal.cols, terminal.rows)) {
       scrollDiagnostic.unchanged();
@@ -913,7 +904,6 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     }
   } else {
     scrollController.setAlternateScreen(false);
-    relativeScrollHint.setRemoteMode(false);
     lastGridFrame = null;
     const plain = typeof result === "string" ? result : result?.text;
     const text = String(plain || "终端尚未就绪")
@@ -1237,7 +1227,7 @@ if (xtermTextarea) bindMobileTerminalTextInput({
 });
 
 window.addEventListener("pagehide", () => {
-  resetScrollView();
+  scrollController.reset();
   releaseInput(selectedSurface);
   releaseAdmin();
   stopped = true;
