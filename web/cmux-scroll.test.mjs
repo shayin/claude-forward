@@ -248,6 +248,51 @@ test("远程滚动在途期间合并快速滑动，最多再发一批而不是�
   assert.equal(f.idle, 1);
 });
 
+test("手机远程触摸上下方向与画面一致，惯性延续同向；桌面滚轮符号不变", async () => {
+  const upward = fixture();
+  upward.controller.setAlternateScreen(true);
+  upward.setWritable(true);
+  upward.setMouseScroll(true);
+  upward.element.scrollHeight = upward.element.clientHeight;
+  upward.touch("touchstart", 220);
+  upward.setTime(20);
+  upward.touch("touchmove", 40);
+  assert.deepEqual(upward.remote, [-10], "手指向上时发送向上的 cmux 滚轮");
+  upward.touch("touchend", 40);
+  await Promise.resolve();
+  upward.flush(36);
+  await Promise.resolve();
+  assert.ok(upward.remote.length >= 2, "向上滑动应继续产生同向惯性");
+  assert.ok(upward.remote.every(lines => lines < 0), "松手后的远程惯性不能反向");
+
+  const downward = fixture();
+  downward.controller.setAlternateScreen(true);
+  downward.setWritable(true);
+  downward.setMouseScroll(true);
+  downward.element.scrollHeight = downward.element.clientHeight;
+  downward.touch("touchstart", 40);
+  downward.setTime(20);
+  downward.touch("touchmove", 220);
+  assert.deepEqual(downward.remote, [10], "手指向下时发送向下的 cmux 滚轮");
+  downward.touch("touchend", 220);
+  await Promise.resolve();
+  downward.flush(36);
+  await Promise.resolve();
+  assert.ok(downward.remote.length >= 2, "向下滑动应继续产生同向惯性");
+  assert.ok(downward.remote.every(lines => lines > 0), "反向手势的惯性也保持同向");
+
+  const desktop = fixture();
+  desktop.controller.setAlternateScreen(true);
+  desktop.setWritable(true);
+  desktop.setMouseScroll(true);
+  desktop.element.scrollHeight = desktop.element.clientHeight;
+  desktop.listeners.get("wheel")({
+    deltaY: -180, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  assert.deepEqual(desktop.remote, [-10], "桌面滚轮的原有方向不变");
+});
+
 test("远程滚动失败时清空队列并允许下一次手势重试", async () => {
   let fail = true;
   const f = fixture(() => fail ? Promise.reject(new Error("network")) : Promise.resolve());
@@ -385,7 +430,7 @@ test("全屏鼠标模式自动远端滚动，退出鼠标模式后恢复本地�
   f.touch("touchmove", 220);
   assert.equal(f.controller.holdFrame(), false);
   assert.equal(f.element.scrollTop, 370);
-  assert.deepEqual(f.remote, [-6]);
+  assert.deepEqual(f.remote, [6]);
   f.touch("touchend", 220);
   f.setMouseScroll(false);
   f.controller.reset();
@@ -395,7 +440,7 @@ test("全屏鼠标模式自动远端滚动，退出鼠标模式后恢复本地�
   f.touch("touchmove", 220);
   f.flush();
   assert.equal(f.element.scrollTop, 250);
-  assert.deepEqual(f.remote, [-6]);
+  assert.deepEqual(f.remote, [6]);
   await Promise.resolve();
 });
 

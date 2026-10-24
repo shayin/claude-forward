@@ -169,7 +169,8 @@ export function mountCmuxScroll({
     const elapsed = Math.max(1, time - lastAt);
     velocity = Math.max(-2.5, Math.min(2.5, (lastY - touch.clientY) / elapsed));
     if (remoteTouchActive) {
-      queueRemote(lastY - touch.clientY);
+      // cmux 的滚轮符号与手机触摸画面的移动方向相反；仅反转远程触摸。
+      queueRemote(touch.clientY - lastY);
     } else if (alternateScreen) {
       scheduleLine(startLine - distance);
     } else {
@@ -206,7 +207,7 @@ export function mountCmuxScroll({
           momentumFrame = 0;
           return;
         }
-        queueRemote(velocity * elapsed);
+        queueRemote(-velocity * elapsed);
         momentumFrame = raf(glideRemote);
       };
       momentumFrame = raf(glideRemote);

@@ -16,7 +16,7 @@ import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-diagnostic";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-touch-direction";
 import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-live-frame";
 
 const status = document.getElementById("status");
