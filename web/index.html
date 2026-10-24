@@ -1116,6 +1116,7 @@
         <div class="header-actions" id="headerActions" style="display:none;">
             <button class="btn-ghost" onclick="newSession()">新会话</button>
             <button class="btn-ghost danger" onclick="detach()">断开</button>
+            <button class="btn-ghost danger" onclick="logoutBrowserSession()">退出登录</button>
         </div>
     </div>
 
@@ -1301,6 +1302,10 @@
             const token = params.get('token') || localStorage.getItem('cf_token') || '';
             if (server) document.getElementById('serverUrl').value = server;
             if (token) document.getElementById('token').value = token;
+            if (params.has('token')) removeTokenFromAddress();
+            if (params.get('login_required') === '1') {
+                setTimeout(() => showConnectionError('请先登录，再进入终端模式'), 0);
+            }
 
             // Auto-resize textarea
             const textarea = document.getElementById('chatInput');
@@ -1359,7 +1364,51 @@
             });
         }
 
-        function connect() {
+        function browserServerURLs(serverUrl) {
+            const input = new URL(serverUrl, window.location.href);
+            if (!['http:', 'https:', 'ws:', 'wss:'].includes(input.protocol)) {
+                throw new Error('服务器地址协议无效');
+            }
+            if (input.username || input.password) throw new Error('服务器地址不能包含账号信息');
+            const httpURL = new URL(input.href);
+            httpURL.protocol = input.protocol === 'wss:' || input.protocol === 'https:' ? 'https:' : 'http:';
+            httpURL.pathname = '/';
+            httpURL.search = '';
+            httpURL.hash = '';
+            if (httpURL.origin !== window.location.origin) {
+                throw new Error('浏览器登录只允许连接当前页面所在的服务器');
+            }
+            const websocketURL = new URL(httpURL.href);
+            websocketURL.protocol = httpURL.protocol === 'https:' ? 'wss:' : 'ws:';
+            websocketURL.pathname = '/ws';
+            return { origin: httpURL.origin, websocket: websocketURL.href };
+        }
+
+        function removeTokenFromAddress() {
+            const current = new URL(window.location.href);
+            if (!current.searchParams.has('token')) return;
+            current.searchParams.delete('token');
+            history.replaceState(null, '', current.pathname + current.search + current.hash);
+        }
+
+        async function establishBrowserSession(origin, token) {
+            const path = token ? '/api/session/login' : '/api/session/status';
+            const options = { method: token ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store' };
+            if (token) options.headers = { Authorization: `Bearer ${token}` };
+            const response = await fetch(origin + path, options);
+            if (!response.ok) {
+                if (response.status === 401) throw new Error(token ? 'Token 无效' : '登录已失效，请重新输入 Token');
+                if (response.status === 429) throw new Error('登录失败次数过多，请稍后再试');
+                throw new Error(`登录失败（HTTP ${response.status}）`);
+            }
+            if (token) {
+                localStorage.removeItem('cf_token');
+                document.getElementById('token').value = '';
+                removeTokenFromAddress();
+            }
+        }
+
+        async function connect() {
             // 清理旧连接，避免重复点击创建多个 WebSocket
             if (ws) {
                 ws.onclose = null;
@@ -1373,14 +1422,29 @@
 
             const serverUrl = document.getElementById('serverUrl').value;
             const token = document.getElementById('token').value;
-            if (!serverUrl || !token) { alert('请填写服务器地址和 Token'); return; }
+            if (!serverUrl) { alert('请填写服务器地址'); return; }
 
             localStorage.setItem('cf_server', serverUrl);
-            localStorage.setItem('cf_token', token);
             updateStatus('connecting', '连接中...');
+            const connectButton = document.getElementById('connectBtn');
+            connectButton.disabled = true;
+            let urls;
+            try {
+                urls = browserServerURLs(serverUrl);
+                await establishBrowserSession(urls.origin, token);
+            } catch (error) {
+                updateStatus('', '未连接');
+                isReconnecting = false;
+                document.getElementById('headerActions').style.display = 'none';
+                showView('connectionView');
+                showConnectionError(error.message);
+                connectButton.disabled = false;
+                return;
+            }
+            connectButton.disabled = false;
 
-            const wsUrl = `${serverUrl}/ws?token=${token}`;
-            showDebug('正在连接: ' + wsUrl.replace(token, '*'.repeat(token.length)));
+            const wsUrl = urls.websocket;
+            showDebug('正在建立已登录 WebSocket');
 
             try { ws = new WebSocket(wsUrl); } catch(e) { showDebug('创建 WebSocket 失败: ' + e.message); return; }
 
@@ -1895,6 +1959,34 @@
             hideReconnect();
         }
 
+        async function logoutBrowserSession() {
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            isReconnecting = false;
+            if (ws) {
+                ws.onclose = null;
+                ws.onerror = null;
+                try { ws.close(); } catch(e) {}
+                ws = null;
+            }
+            try {
+                const urls = browserServerURLs(document.getElementById('serverUrl').value);
+                await fetch(urls.origin + '/api/session/logout', {
+                    method: 'POST', credentials: 'same-origin', cache: 'no-store'
+                });
+            } catch(e) {
+                showDebug('退出登录请求失败: ' + e.message);
+            }
+            localStorage.removeItem('cf_token');
+            document.getElementById('token').value = '';
+            attachedClient = null;
+            waitingForClient = null;
+            stopPollingForClient();
+            localStorage.removeItem('cf_attached_client');
+            document.getElementById('headerActions').style.display = 'none';
+            updateStatus('', '未连接');
+            showView('connectionView');
+        }
+
         function newSession() {
             sendMessage({ type: 'new_session' });
             currentSessionID = null;
@@ -2095,7 +2187,7 @@
             const client = availableClients[index];
             if (!client || !Array.isArray(client.features) || !client.features.includes('cmux')) return;
             localStorage.setItem('cf_cmux_client', client.id);
-            window.location.assign('cmux.html?v=20261024-scroll-inertia-lite');
+            window.location.assign('cmux.html?v=20261024-browser-session');
         }
 
         // === Start ===

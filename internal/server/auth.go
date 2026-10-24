@@ -1,13 +1,29 @@
 package server
 
 import (
+	"crypto/sha256"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
+
+const (
+	BrowserSessionCookie = "cf_session"
+	browserSessionTTL    = 12 * time.Hour
+)
+
+type browserSession struct {
+	principal [sha256.Size]byte
+	expiresAt time.Time
+}
 
 // Auth 认证中间件
 type Auth struct {
-	tokens map[string]bool
+	tokens   map[string]bool
+	mu       sync.Mutex
+	sessions map[[sha256.Size]byte]browserSession
+	now      func() time.Time
 }
 
 // NewAuth 创建认证实例
@@ -16,7 +32,11 @@ func NewAuth(tokens []string) *Auth {
 	for _, t := range tokens {
 		tokenMap[t] = true
 	}
-	return &Auth{tokens: tokenMap}
+	return &Auth{
+		tokens:   tokenMap,
+		sessions: make(map[[sha256.Size]byte]browserSession),
+		now:      time.Now,
+	}
 }
 
 // Middleware 返回认证中间件
@@ -33,7 +53,7 @@ func (a *Auth) Middleware(next http.HandlerFunc) http.HandlerFunc {
 			token = strings.TrimPrefix(token, "Bearer ")
 		}
 
-		if !a.tokens[token] {
+		if !a.ValidateToken(token) && !a.ValidateBrowserSession(r) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -45,4 +65,8 @@ func (a *Auth) Middleware(next http.HandlerFunc) http.HandlerFunc {
 // ValidateToken 验证 token
 func (a *Auth) ValidateToken(token string) bool {
 	return a.tokens[token]
+}
+
+func tokenPrincipal(token string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(token))
 }

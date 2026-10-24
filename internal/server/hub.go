@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"log"
 	"sync"
@@ -34,6 +35,8 @@ type Connection struct {
 	Send               chan *protocol.Message
 	mu                 sync.Mutex
 	lastCmuxDiagnostic time.Time // 仅用于该连接的诊断日志限速
+	browserSession     bool
+	browserSessionKey  [sha256.Size]byte
 }
 
 func (h *Hub) HasCmuxAttachment(userID string) bool {

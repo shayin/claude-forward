@@ -82,7 +82,7 @@ test("cmux page title and header use terminal mode name", () => {
 test("terminal entry and dependencies use a fresh resource version", () => {
   const index = readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
-  const version = "20261024-scroll-inertia-lite";
+  const version = "20261024-browser-session";
   assert.match(index, new RegExp(`location\\.assign\\('cmux\\.html\\?v=${version}'\\)`));
   for (const asset of ["cmux.mjs", "cmux.css", "lib/xterm.min.js",
     "lib/xterm-addon-fit.min.js", "lib/xterm.css"]) {
@@ -220,4 +220,29 @@ test("滚动中途显示回放画面，空闲时补最终画面，切换终端�
   context.selectedSurface = "other";
   handlers.onRemoteIdle();
   assert.equal(snapshots.length, 2);
+});
+
+test("浏览器认证迁移长期 Token 且不再把 Token 放进 WebSocket URL", () => {
+  const index = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const cmux = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");
+  const download = readFileSync(new URL("./cmux-download-http.mjs", import.meta.url), "utf8");
+  assert.match(index, /\/api\/session\/login/);
+  assert.match(index, /\/api\/session\/status/);
+  assert.match(index, /\/api\/session\/logout/);
+  assert.match(index, /localStorage\.removeItem\('cf_token'\)/);
+  assert.match(index, /history\.replaceState/);
+  assert.doesNotMatch(index, /localStorage\.setItem\('cf_token'/);
+  assert.doesNotMatch(index, /\/ws\?token=/);
+  assert.doesNotMatch(cmux, /cf_token|\/ws\?token=/);
+  assert.match(download, /credentials: "same-origin"/);
+  assert.doesNotMatch(download, /Authorization|cf_token/);
+});
+
+test("页面内联脚本保持语法有效", () => {
+  for (const file of ["index.html", "cmux.html"]) {
+    const html = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    for (const match of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
+      assert.doesNotThrow(() => new Function(match[1]), `invalid inline script in ${file}`);
+    }
+  }
 });

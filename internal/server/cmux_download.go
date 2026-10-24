@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -102,8 +101,17 @@ func (h *Handler) HandleCmuxDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	const base = "/api/cmux-download"
 	if r.URL.Path == base && r.Method == http.MethodPost {
+		if _, err := r.Cookie(BrowserSessionCookie); err == nil &&
+			r.Header.Get("Authorization") == "" && !sameBrowserOrigin(r) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		token := downloadBearer(r)
-		if token == "" || !h.auth.ValidateToken(token) {
+		principal, authenticated := h.auth.RequestPrincipal(r)
+		if token != "" && !h.auth.ValidateToken(token) {
+			authenticated = false
+		}
+		if !authenticated {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -120,7 +128,7 @@ func (h *Handler) HandleCmuxDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		session := &cmuxDownloadSession{
-			name: input.Name, size: input.Size, owner: sha256.Sum256([]byte(token)),
+			name: input.Name, size: input.Size, owner: principal,
 			started: make(chan struct{}), done: make(chan struct{}),
 			parts: make(chan cmuxDownloadPart),
 		}
@@ -175,8 +183,13 @@ func (h *Handler) HandleCmuxDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	token := downloadBearer(r)
-	if token == "" || !h.auth.ValidateToken(token) || sha256.Sum256([]byte(token)) != session.owner {
+	if _, err := r.Cookie(BrowserSessionCookie); err == nil &&
+		r.Header.Get("Authorization") == "" && !sameBrowserOrigin(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+	principal, authenticated := h.auth.RequestPrincipal(r)
+	if !authenticated || principal != session.owner {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}

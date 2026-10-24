@@ -6,12 +6,10 @@ const id = "01234567-89ab-cdef-0123-456789abcdef";
 
 function fixture(fetchImpl) {
   const before = {
-    localStorage: globalThis.localStorage,
     document: globalThis.document,
     fetch: globalThis.fetch
   };
   const links = [];
-  globalThis.localStorage = { getItem: () => "local-test-token" };
   globalThis.document = {
     body: { append() {} },
     createElement: () => {
@@ -52,7 +50,8 @@ test("HTTP 大文件传输经一次性票据和有限分片，不累积整文件
       `./api/cmux-download/${id}/chunk`, `./api/cmux-download/${id}/finish`
     ]);
     assert.deepEqual(calls.slice(1, 3).map(call => call.headers["X-Download-Offset"]), ["0", "2"]);
-    assert.equal(calls.at(-1).headers.Authorization, "Bearer local-test-token");
+    assert.ok(calls.every(call => call.credentials === "same-origin"));
+    assert.ok(calls.every(call => !call.headers?.Authorization));
   } finally { env.restore(); }
 });
 
@@ -70,8 +69,5 @@ test("文件变化或错误时终止 HTTP 下载，不确认完成", async () =>
       data: Buffer.from("a").toString("base64")
     }), () => true), /下载前文件发生变化/);
     assert.deepEqual(calls, ["./api/cmux-download", `./api/cmux-download/${id}/abort`]);
-    globalThis.localStorage.getItem = () => "";
-    await assert.rejects(downloadThroughHTTP("/root/large", "large.bin",
-      async () => { throw Error("unexpected"); }, () => true), /先登录/);
   } finally { env.restore(); }
 });

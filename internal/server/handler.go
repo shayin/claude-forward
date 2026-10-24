@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -148,9 +149,23 @@ func (h *Handler) saveBackgroundPushesLocked() {
 
 // HandleWS 处理 WebSocket 连接
 func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
-	// 认证
-	token := r.URL.Query().Get("token")
-	if !h.auth.ValidateToken(token) {
+	// 浏览器 WebSocket 使用 HttpOnly 会话；机器 Client 没有 Origin，保留 Token 接入。
+	var browserKey [32]byte
+	var browserExpiresAt time.Time
+	browserAuthenticated := false
+	if r.Header.Get("Origin") != "" {
+		if !sameBrowserOrigin(r) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		key, session, ok := h.auth.browserSessionDetails(r)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		browserKey, browserExpiresAt, browserAuthenticated =
+			key, session.expiresAt, true
+	} else if !h.auth.ValidateToken(r.URL.Query().Get("token")) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -162,10 +177,18 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	connection := &Connection{
-		ID:   uuid.New().String(),
-		Conn: conn,
-		Send: make(chan *protocol.Message, 256),
-		Type: ConnTypeUser, // 默认为用户连接
+		ID:                uuid.New().String(),
+		Conn:              conn,
+		Send:              make(chan *protocol.Message, 256),
+		Type:              ConnTypeUser, // 默认为用户连接
+		browserSession:    browserAuthenticated,
+		browserSessionKey: browserKey,
+	}
+	if browserAuthenticated {
+		expire := time.AfterFunc(time.Until(browserExpiresAt), func() {
+			_ = connection.Conn.Close()
+		})
+		defer expire.Stop()
 	}
 
 	// 注册用户连接到 Hub
@@ -190,6 +213,9 @@ func (h *Handler) readPump(conn *Connection) {
 	conn.Conn.SetReadLimit(24 << 20) // 支持 16 MiB 文件经 JSON/base64 回传
 	conn.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	conn.Conn.SetPongHandler(func(string) error {
+		if conn.browserSession && !h.auth.validateBrowserSessionKey(conn.browserSessionKey) {
+			return errors.New("browser session revoked")
+		}
 		conn.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 		return nil
 	})
@@ -211,6 +237,9 @@ func (h *Handler) readPump(conn *Connection) {
 		if err != nil {
 			log.Printf("Decrypt error: %v", err)
 			continue
+		}
+		if conn.browserSession && !h.auth.validateBrowserSessionKey(conn.browserSessionKey) {
+			return
 		}
 
 		h.handleMessage(conn, decrypted)

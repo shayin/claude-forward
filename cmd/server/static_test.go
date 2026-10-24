@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/shayin/claude-forward/internal/server"
 )
 
 func TestTerminalStaticFiles(t *testing.T) {
@@ -50,5 +52,48 @@ func TestTerminalStaticFiles(t *testing.T) {
 					recorder.Code, recorder.Header())
 			}
 		})
+	}
+}
+
+func TestProtectTerminalAssetsRequiresBrowserSession(t *testing.T) {
+	auth := server.NewAuth([]string{"valid-token"})
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := protectTerminalAssets(auth, next)
+
+	html := httptest.NewRequest(http.MethodGet, "/cmux.html", nil)
+	htmlRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(htmlRecorder, html)
+	if htmlRecorder.Code != http.StatusSeeOther ||
+		htmlRecorder.Header().Get("Location") != "/?login_required=1" {
+		t.Fatalf("unprotected terminal page: code=%d location=%q",
+			htmlRecorder.Code, htmlRecorder.Header().Get("Location"))
+	}
+
+	module := httptest.NewRequest(http.MethodGet, "/cmux-scroll.mjs", nil)
+	moduleRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(moduleRecorder, module)
+	if moduleRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("unprotected terminal module: code=%d", moduleRecorder.Code)
+	}
+
+	public := httptest.NewRequest(http.MethodGet, "/index.html", nil)
+	publicRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(publicRecorder, public)
+	if publicRecorder.Code != http.StatusOK {
+		t.Fatalf("login page must remain public: code=%d", publicRecorder.Code)
+	}
+
+	value, _, ok := auth.CreateBrowserSession("valid-token")
+	if !ok {
+		t.Fatal("cannot create browser session")
+	}
+	authorized := httptest.NewRequest(http.MethodGet, "/cmux.html", nil)
+	authorized.AddCookie(&http.Cookie{Name: server.BrowserSessionCookie, Value: value})
+	authorizedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(authorizedRecorder, authorized)
+	if authorizedRecorder.Code != http.StatusOK {
+		t.Fatalf("authorized terminal page code=%d", authorizedRecorder.Code)
 	}
 }

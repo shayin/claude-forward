@@ -1,13 +1,10 @@
-import { streamFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia-lite";
+import { streamFileChunks } from "./cmux-files.mjs?v=20261024-browser-session";
 
 const downloadLimit = 1 << 30;
 
 // HTTP 也可流式下载：浏览器无 Service Worker/文件保存 API 时，Server 仅中继已授权
 // file_read 的小分片，不接受任意本机路径，亦不在浏览器拼装整文件 Blob。
 export async function downloadThroughHTTP(path, name, request, stillCurrent) {
-  const token = localStorage.getItem("cf_token");
-  if (!token) throw new Error("请先登录 Claude Forward");
-  const headers = { Authorization: `Bearer ${token}` };
   const metadata = await request("file_read", { path, offset: 0, read_bytes: 1 });
   if (!stillCurrent() || !Number.isSafeInteger(metadata?.size) ||
       metadata.size < 0 || metadata.size > downloadLimit ||
@@ -15,7 +12,8 @@ export async function downloadThroughHTTP(path, name, request, stillCurrent) {
     throw new Error("文件大小无效或已切换 Client");
   }
   const prepare = await fetch("./api/cmux-download", {
-    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, size: metadata.size }), cache: "no-store"
   });
   if (!prepare.ok) throw new Error(`下载准备失败（HTTP ${prepare.status}）`);
@@ -43,7 +41,8 @@ export async function downloadThroughHTTP(path, name, request, stillCurrent) {
       async write(bytes) {
         const response = await fetch(`${base}/chunk`, {
           method: "POST",
-          headers: { ...headers, "X-Download-Offset": String(offset) },
+          credentials: "same-origin",
+          headers: { "X-Download-Offset": String(offset) },
           body: bytes, cache: "no-store"
         });
         if (!response.ok) throw new Error(`下载分片中断（HTTP ${response.status}）`);
@@ -52,12 +51,15 @@ export async function downloadThroughHTTP(path, name, request, stillCurrent) {
     }, stillCurrent);
     const finish = await fetch(`${base}/finish`, {
       method: "POST",
-      headers: { ...headers, "X-Download-Offset": String(offset) },
+      credentials: "same-origin",
+      headers: { "X-Download-Offset": String(offset) },
       cache: "no-store"
     });
     if (!finish.ok) throw new Error(`下载完成确认失败（HTTP ${finish.status}）`);
   } catch (error) {
-    await fetch(`${base}/abort`, { method: "POST", headers, cache: "no-store" }).catch(() => {});
+    await fetch(`${base}/abort`, {
+      method: "POST", credentials: "same-origin", cache: "no-store"
+    }).catch(() => {});
     throw error;
   }
 }

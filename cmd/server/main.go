@@ -51,6 +51,7 @@ func main() {
 		log.Printf("Application-layer encryption enabled")
 	}
 	handler := server.NewHandler(hub, auth, encryptionKey)
+	sessionHandler := server.NewBrowserSessionHandler(auth)
 
 	// 启动 Hub
 	go hub.Run()
@@ -59,6 +60,9 @@ func main() {
 	http.HandleFunc("/ws", handler.HandleWS)
 	http.HandleFunc("/share/", handler.HandleShare)
 	http.HandleFunc("/api/clients", clientsHandler(hub, auth))
+	http.HandleFunc("/api/session/login", sessionHandler.HandleLogin)
+	http.HandleFunc("/api/session/status", sessionHandler.HandleStatus)
+	http.HandleFunc("/api/session/logout", sessionHandler.HandleLogout)
 
 	// Bot API（供微信桥接等第三方服务调用）
 	botHandler := server.NewBotHandler(hub, auth)
@@ -112,7 +116,7 @@ func main() {
 
 	// 静态文件服务（带 gzip 压缩）
 	fs := http.FileServer(http.Dir("web"))
-	http.Handle("/", terminalStaticFiles(gzipMiddleware(fs)))
+	http.Handle("/", protectTerminalAssets(auth, terminalStaticFiles(gzipMiddleware(fs))))
 
 	// 创建 HTTP 服务器
 	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)

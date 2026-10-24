@@ -1,24 +1,24 @@
-import { renderGrid } from "./cmux-render.mjs?v=20261024-scroll-inertia-lite";
-import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-scroll-inertia-lite";
-import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261024-scroll-inertia-lite";
-import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261024-scroll-inertia-lite";
-import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-scroll-inertia-lite";
+import { renderGrid } from "./cmux-render.mjs?v=20261024-browser-session";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-browser-session";
+import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261024-browser-session";
+import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261024-browser-session";
+import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-browser-session";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-scroll-inertia-lite";
-import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-scroll-inertia-lite";
-import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-scroll-inertia-lite";
-import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-scroll-inertia-lite";
-import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261024-scroll-inertia-lite";
-import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261024-scroll-inertia-lite";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-scroll-inertia-lite";
-import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261024-scroll-inertia-lite";
-import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261024-scroll-inertia-lite";
-import { setConnectionIndicator } from "./cmux-status.mjs?v=20261024-scroll-inertia-lite";
-import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261024-scroll-inertia-lite";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-inertia-lite";
-import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-scroll-inertia-lite";
-import { commandDraft } from "./cmux-commands.mjs?v=20261024-scroll-inertia-lite";
+  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-browser-session";
+import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-browser-session";
+import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-browser-session";
+import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-browser-session";
+import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261024-browser-session";
+import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261024-browser-session";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-browser-session";
+import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261024-browser-session";
+import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261024-browser-session";
+import { setConnectionIndicator } from "./cmux-status.mjs?v=20261024-browser-session";
+import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261024-browser-session";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-browser-session";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-browser-session";
+import { commandDraft } from "./cmux-commands.mjs?v=20261024-browser-session";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -896,14 +896,27 @@ async function refreshNotifications() {
 }
 
 function connect() {
-  const server = localStorage.getItem("cf_server");
-  const token = localStorage.getItem("cf_token");
-  if (!server || !token) {
-    connectionState("unavailable", "请先返回原有页面填写 CF 地址和 Token");
+  const server = localStorage.getItem("cf_server") ||
+    `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
+  if (!server) {
+    connectionState("unavailable", "请先返回原有页面登录");
+    return;
+  }
+  let url;
+  try {
+    const parsed = new URL(server, location.href);
+    parsed.protocol = parsed.protocol === "https:" || parsed.protocol === "wss:" ? "wss:" : "ws:";
+    parsed.pathname = "/ws";
+    parsed.search = "";
+    parsed.hash = "";
+    const httpOrigin = `${parsed.protocol === "wss:" ? "https:" : "http:"}//${parsed.host}`;
+    if (httpOrigin !== location.origin) throw new Error("终端页面只能连接当前服务器");
+    url = parsed.href;
+  } catch (error) {
+    connectionState("unavailable", error.message);
     return;
   }
   connectionState("connecting", "连接中…");
-  const url = `${server.replace(/\/+$/, "")}/ws?token=${encodeURIComponent(token)}`;
   const channel = new WebSocket(url);
   socket = channel;
   channel.onopen = () => {
