@@ -58,18 +58,7 @@ func main() {
 	// 设置路由
 	http.HandleFunc("/ws", handler.HandleWS)
 	http.HandleFunc("/share/", handler.HandleShare)
-	http.HandleFunc("/api/clients", func(w http.ResponseWriter, r *http.Request) {
-		// CORS
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-
-		if r.Method == "OPTIONS" {
-			return
-		}
-
-		clients := hub.ListClients()
-		w.Write(mustMarshal(clients))
-	})
+	http.HandleFunc("/api/clients", clientsHandler(hub, auth))
 
 	// Bot API（供微信桥接等第三方服务调用）
 	botHandler := server.NewBotHandler(hub, auth)
