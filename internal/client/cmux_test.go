@@ -167,6 +167,25 @@ func TestCmuxManagerSnapshotCarriesExpiringViewport(t *testing.T) {
 	}
 }
 
+func TestCmuxManagerRetriesSnapshotViewportTransition(t *testing.T) {
+	calls := 0
+	socket := fakeCmuxSocket(t, func(request cmuxRPCRequest) string {
+		calls++
+		if calls == 1 {
+			return `{"ok":false,"error":{"code":"viewport_transition","message":"resizing"}}`
+		}
+		return `{"ok":true,"result":{"columns":90,"rows":28}}`
+	})
+	manager := NewCmuxManager(CmuxConfig{Enabled: true, SocketPath: socket})
+	result, err := manager.Execute(context.Background(), protocol.CmuxRequestPayload{
+		RequestID: "snapshot", Action: protocol.CmuxSnapshot, SurfaceID: "surface:1",
+		ViewerID: "user-1", Columns: 90, Rows: 28, Generation: 1,
+	})
+	if err != nil || calls != 2 || !strings.Contains(string(result), `"columns":90`) {
+		t.Fatalf("viewport transition was not retried: calls=%d result=%s err=%v", calls, result, err)
+	}
+}
+
 func TestCmuxManagerSanitizesSocketError(t *testing.T) {
 	socket := fakeCmuxSocket(t, func(cmuxRPCRequest) string {
 		return `{"ok":false,"error":{"secret":"must-not-leak"}}`

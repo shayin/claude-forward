@@ -23,7 +23,10 @@ import (
 
 const maxCmuxResponseBytes = 16 << 20
 
-var errCmuxMethodUnavailable = errors.New("当前 cmux 版本不支持此操作")
+var (
+	errCmuxMethodUnavailable  = errors.New("当前 cmux 版本不支持此操作")
+	errCmuxViewportTransition = errors.New("cmux viewport transition")
+)
 
 // CmuxManager 只连接现有 cmux socket，不创建终端、不修改全局配置。
 type CmuxManager struct {
@@ -192,6 +195,19 @@ func (m *CmuxManager) ExecuteWithLease(ctx context.Context, request protocol.Cmu
 	// Socket 密码只在本机 RPC 中使用，绝不由网页或云端传入。
 	params.Password = os.Getenv("CMUX_SOCKET_PASSWORD")
 	result, err := m.rpc(ctx, method, params)
+	if request.Action == protocol.CmuxSnapshot && request.Columns > 0 &&
+		errors.Is(err, errCmuxViewportTransition) {
+		// replay 会先调整 PTY 再抓帧；首帧可能正处于尺寸切换，短暂等待后重读，
+		// 不把可恢复的过渡态暴露成手机端错误。
+		timer := time.NewTimer(120 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			result, err = m.rpc(ctx, method, params)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if request.Action == protocol.CmuxScroll && err == nil {
 		// 本机回放通常远短于手机到 Server 的一趟往返；把中途画面搭在滚动回执上。
 		// Codex 可能异步重绘，网页仍会在滚动结束后补读一次最终快照。
@@ -380,6 +396,9 @@ func (m *CmuxManager) rpc(ctx context.Context, method string, params cmuxRPCPara
 			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(response.Error, &failure)
+		if failure.Code == "viewport_transition" {
+			return nil, errCmuxViewportTransition
+		}
 		if failure.Code == "method_not_found" || failure.Code == "unknown_method" ||
 			strings.Contains(strings.ToLower(failure.Message), "unknown method") {
 			return nil, errCmuxMethodUnavailable
