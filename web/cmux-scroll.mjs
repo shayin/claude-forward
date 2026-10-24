@@ -1,7 +1,7 @@
 // 普通历史在本地浏览；支持鼠标滚动的全屏 TUI 将手势交给远端程序。
 export function mountCmuxScroll({
   element, terminal, isSelected, canRemoteScroll, sendRemoteScroll, onRemoteError,
-  onReturnToBottom, onRemoteActivity = () => {},
+  onReturnToBottom, onRemoteActivity = () => {}, onRemoteIdle = () => {},
   raf = requestAnimationFrame, cancelRaf = cancelAnimationFrame, now = performance.now.bind(performance)
 }) {
   let alternateScreen = false;
@@ -81,6 +81,7 @@ export function mountCmuxScroll({
     if (remoteBusy) return;
     remoteBusy = true;
     const current = generation;
+    let failed = false;
     try {
       while (current === generation && alternateScreen && canRemoteScroll() && remoteLines) {
         // 一次 RPC 已包含远端滚动及回放；不要把一次滑动拆成多次串行往返。
@@ -91,11 +92,15 @@ export function mountCmuxScroll({
     } catch (error) {
       if (current === generation) {
         remoteLines = 0;
+        failed = true;
         onRemoteError(error);
       }
     } finally {
       remoteBusy = false;
       if (remoteLines && alternateScreen && canRemoteScroll()) void drainRemote();
+      else if (!failed && current === generation && alternateScreen && canRemoteScroll()) {
+        onRemoteIdle();
+      }
     }
   }
   const cancelRemote = () => {

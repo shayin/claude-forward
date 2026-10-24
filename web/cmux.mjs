@@ -16,7 +16,7 @@ import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-batch";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-ack-scroll";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -96,6 +96,7 @@ let snapshotInFlight = null;
 let snapshotAfterFlight = false;
 let lastFrame = "";
 let lastGridFrame = null;
+let remoteNeedsSnapshot = null;
 const frameOrder = createCmuxFrameOrder();
 const scrollPositions = createScrollPositions();
 let pendingPosition = false;
@@ -131,16 +132,25 @@ const scrollController = mountCmuxScroll({
         surface === selectedSurface && epoch === sessionEpoch) {
       if (result?.render_grid) {
         if (!scrollController.hasPendingRemote()) {
+          remoteNeedsSnapshot = null;
           applySnapshot(result, workspace, surface, epoch, sequence);
         }
       } else {
-        void refreshSnapshot(true);
+        remoteNeedsSnapshot = { client, workspace, surface, epoch };
       }
     }
   },
   onRemoteError: error => {
+    remoteNeedsSnapshot = null;
     showStatus(`终端滚动失败：${error.message}`);
     void refreshSnapshot(true);
+  },
+  onRemoteIdle: () => {
+    const target = remoteNeedsSnapshot;
+    remoteNeedsSnapshot = null;
+    if (target && target.client === activeClient &&
+        target.workspace === selectedWorkspace && target.surface === selectedSurface &&
+        target.epoch === sessionEpoch) void refreshSnapshot(true);
   },
   onReturnToBottom: () => void refreshSnapshot(true)
 });
@@ -798,7 +808,8 @@ async function refreshSnapshot(urgent = false) {
   const sequence = frameOrder.issue();
   try {
     const result = await request("snapshot", { workspace_id: workspace, surface_id: surface });
-    if (urgent || !scrollController.isRemoteActive()) {
+    // 请求发出后若又开始了滚动，旧快照不能覆盖正在进行的手势。
+    if (!scrollController.isRemoteActive()) {
       applySnapshot(result, workspace, surface, epoch, sequence);
     }
   } catch (error) {

@@ -78,3 +78,42 @@ test("cmux page title and header use terminal mode name", () => {
   assert.match(html, /rel="icon".*href="favicon\.svg"/);
   assert.doesNotMatch(html, /云桥终端/);
 });
+
+test("滚动 ACK 只在队列空闲后取一次最终画面，切换终端后不补旧快照", async () => {
+  const source = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");
+  const begin = source.indexOf("const scrollController = mountCmuxScroll({");
+  const end = source.indexOf("const fileView = mountCmuxFiles(", begin);
+  assert.ok(begin > 0 && end > begin);
+  let handlers;
+  let pending = false;
+  const snapshots = [];
+  const context = {
+    terminalElement: {}, terminal: {}, terminalPane: { hidden: false },
+    selectedSurface: "surface", selectedWorkspace: "workspace", activeClient: "client",
+    inputOwned: true, lastGridFrame: { mouseScroll: true }, sessionEpoch: 1,
+    remoteNeedsSnapshot: null,
+    frameOrder: { issue: () => 1 },
+    mountCmuxScroll: options => {
+      handlers = options;
+      return { hasPendingRemote: () => pending };
+    },
+    request: async () => ({ scrolled: true }),
+    refreshSnapshot: urgent => { snapshots.push(urgent); },
+    applySnapshot: () => { throw new Error("ACK 不应当作快照"); },
+    showStatus: () => {}
+  };
+  vm.runInNewContext(source.slice(begin, end), context);
+  pending = true;
+  await handlers.sendRemoteScroll(-4);
+  await handlers.sendRemoteScroll(-6);
+  assert.equal(snapshots.length, 0);
+  pending = false;
+  handlers.onRemoteIdle();
+  assert.deepEqual(snapshots, [true]);
+  handlers.onRemoteIdle();
+  assert.equal(snapshots.length, 1);
+  await handlers.sendRemoteScroll(-2);
+  context.selectedSurface = "other";
+  handlers.onRemoteIdle();
+  assert.equal(snapshots.length, 1);
+});

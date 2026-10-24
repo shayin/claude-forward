@@ -14,6 +14,7 @@ function fixture(send = () => Promise.resolve()) {
   const errors = [];
   let activities = 0;
   let resumed = 0;
+  let idle = 0;
   let scrollListener = () => {};
   const buffer = { baseY: 100, viewportY: 100 };
   const terminal = {
@@ -41,6 +42,7 @@ function fixture(send = () => Promise.resolve()) {
     sendRemoteScroll: lines => { remote.push(lines); return send(lines); },
     onRemoteError: error => errors.push(error),
     onRemoteActivity: () => { activities++; },
+    onRemoteIdle: () => { idle++; },
     onReturnToBottom: () => { resumed++; },
     raf: callback => { callbacks.set(++frameID, callback); return frameID; },
     cancelRaf: id => callbacks.delete(id),
@@ -72,6 +74,7 @@ function fixture(send = () => Promise.resolve()) {
     },
     setSelected(value) { selected = value; },
     get resumed() { return resumed; },
+    get idle() { return idle; },
     get activities() { return activities; }
   };
 }
@@ -208,10 +211,12 @@ test("无本地溢出时保留桌面滚轮远端队列，切换终端丢弃旧�
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(f.remote, [-10, -3]);
+  assert.equal(f.idle, 0);
   f.controller.reset();
   resolve();
   await Promise.resolve();
   assert.deepEqual(f.remote, [-10, -3]);
+  assert.equal(f.idle, 0);
 });
 
 test("远程滚动在途期间合并快速滑动，最多再发一批而不是逐帧往返", async () => {
@@ -234,11 +239,13 @@ test("远程滚动在途期间合并快速滑动，最多再发一批而不是�
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(f.remote, [-1, -32]);
+  assert.equal(f.idle, 0);
   resolve();
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(f.controller.hasPendingRemote(), false);
   assert.equal(f.controller.isRemoteActive(), false);
+  assert.equal(f.idle, 1);
 });
 
 test("远程滚动失败时清空队列并允许下一次手势重试", async () => {
@@ -258,11 +265,13 @@ test("远程滚动失败时清空队列并允许下一次手势重试", async ()
   await Promise.resolve();
   assert.deepEqual(f.remote, [-1]);
   assert.equal(f.errors.length, 1);
+  assert.equal(f.idle, 0);
   assert.equal(f.controller.hasPendingRemote(), false);
   fail = false;
   wheel(-36);
   await Promise.resolve();
   assert.deepEqual(f.remote, [-1, -2]);
+  assert.equal(f.idle, 1);
 });
 
 test("桌面滚轮失去输入权后不补发旧位移，手机触摸仍可本地查看", async () => {
