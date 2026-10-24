@@ -79,6 +79,87 @@ test("cmux page title and header use terminal mode name", () => {
   assert.doesNotMatch(html, /云桥终端/);
 });
 
+test("terminal entry and dependencies use a fresh resource version", () => {
+  const index = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
+  const version = "20261024-wechat-cache";
+  assert.match(index, new RegExp(`location\\.assign\\('cmux\\.html\\?v=${version}'\\)`));
+  for (const asset of ["cmux.mjs", "cmux.css", "lib/xterm.min.js",
+    "lib/xterm-addon-fit.min.js", "lib/xterm.css"]) {
+    assert.ok(html.includes(`${asset}?v=${version}`), `missing version on ${asset}`);
+  }
+  const pending = ["cmux.mjs"];
+  const visited = new Set();
+  while (pending.length) {
+    const file = pending.pop();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    const moduleURL = new URL(`./${file}`, import.meta.url);
+    const source = readFileSync(moduleURL, "utf8");
+    for (const [, importPath] of source.matchAll(/from "(\.\/[^"]+)"/g)) {
+      assert.ok(importPath.endsWith(`?v=${version}`),
+        `missing version in ${file}: ${importPath}`);
+      pending.push(new URL(importPath.split("?")[0], moduleURL).pathname
+        .split("/web/")[1]);
+    }
+  }
+  assert.ok(visited.has("cmux-preview.mjs"), "must validate transitive imports");
+  assert.match(readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8"),
+    /document\.documentElement\.dataset\.cmuxStarted = "1"/);
+});
+
+test("module startup watchdog distinguishes script failure and slow connection", () => {
+  const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
+  const source = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/)?.[1];
+  assert.ok(source);
+  for (const [started, expected] of [
+    [false, "终端脚本未启动"],
+    [true, "终端仍在连接"]
+  ]) {
+    const attributes = {};
+    const button = {
+      classList: { add: name => { attributes.className = name; } },
+      setAttribute: (name, value) => { attributes[name] = value; }
+    };
+    const indicator = { dataset: { state: "connecting" } };
+    const status = { textContent: "" };
+    const context = {
+      document: {
+        documentElement: { dataset: { cmuxStarted: started ? "1" : "" } },
+        getElementById: id => ({
+          statusIndicator: indicator, connectionStatusButton: button, status
+        })[id]
+      },
+      window: { setInterval: callback => { context.tick = callback; } }
+    };
+    vm.runInNewContext(source, context);
+    context.tick();
+    assert.equal(indicator.dataset.state, "unavailable");
+    assert.match(status.textContent, new RegExp(expected));
+    assert.equal(attributes["aria-label"], status.textContent);
+    assert.equal(attributes.className, "expanded");
+  }
+  const indicator = { dataset: { state: "ready" } };
+  const button = { setAttribute: () => {}, classList: { add: () => {} } };
+  const status = { textContent: "" };
+  const context = {
+    document: {
+      documentElement: { dataset: {} },
+      getElementById: id => ({
+        statusIndicator: indicator, connectionStatusButton: button, status
+      })[id]
+    },
+    window: { setInterval: callback => { context.tick = callback; } }
+  };
+  vm.runInNewContext(source, context);
+  context.tick();
+  assert.equal(indicator.dataset.state, "ready", "watchdog must not overwrite a healthy connection");
+  indicator.dataset.state = "connecting";
+  context.tick();
+  assert.equal(indicator.dataset.state, "unavailable",
+    "watchdog must also diagnose a later stalled reconnection");
+});
+
 test("快捷菜单提供模型命令但不自动提交，按终端类型标注专属命令", () => {
   const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
   const source = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");

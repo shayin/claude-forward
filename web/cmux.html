@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Claude Forward · 终端模式</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="lib/xterm.css">
-  <link rel="stylesheet" href="cmux.css?v=20261024-direct-keys">
+  <link rel="stylesheet" href="lib/xterm.css?v=20261024-wechat-cache">
+  <link rel="stylesheet" href="cmux.css?v=20261024-wechat-cache">
 </head>
 <body>
   <header>
@@ -163,8 +163,24 @@
       </div>
     </section>
   </main>
-  <script src="lib/xterm.min.js"></script>
-  <script src="lib/xterm-addon-fit.min.js"></script>
-  <script type="module" src="cmux.mjs?v=20261024-viewport-ttl"></script>
+  <script>
+    // 模块或其依赖加载失败时，不能让手机端永久停在初始黄点。
+    window.setInterval(function () {
+      var indicator = document.getElementById("statusIndicator");
+      if (indicator.dataset.state !== "connecting") return;
+      var started = document.documentElement.dataset.cmuxStarted === "1";
+      var message = started
+        ? "终端仍在连接；请检查微信内的网络连接"
+        : "终端脚本未启动；请重新从聊天页进入，或清理微信网页缓存";
+      indicator.dataset.state = "unavailable";
+      var button = document.getElementById("connectionStatusButton");
+      document.getElementById("status").textContent = message;
+      button.setAttribute("aria-label", message);
+      button.classList.add("expanded");
+    }, 15000);
+  </script>
+  <script src="lib/xterm.min.js?v=20261024-wechat-cache"></script>
+  <script src="lib/xterm-addon-fit.min.js?v=20261024-wechat-cache"></script>
+  <script type="module" src="cmux.mjs?v=20261024-wechat-cache"></script>
 </body>
 </html>

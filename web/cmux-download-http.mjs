@@ -1,4 +1,4 @@
-import { streamFileChunks } from "./cmux-files.mjs";
+import { streamFileChunks } from "./cmux-files.mjs?v=20261024-wechat-cache";
 
 const downloadLimit = 1 << 30;
 

@@ -1,7 +1,7 @@
-import { filePreviewKind, readFileChunks, streamFileChunks } from "./cmux-files.mjs";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs";
-import { renderSandboxedPreview } from "./cmux-preview.mjs";
-import { downloadThroughHTTP } from "./cmux-download-http.mjs";
+import { filePreviewKind, readFileChunks, streamFileChunks } from "./cmux-files.mjs?v=20261024-wechat-cache";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-wechat-cache";
+import { renderSandboxedPreview } from "./cmux-preview.mjs?v=20261024-wechat-cache";
+import { downloadThroughHTTP } from "./cmux-download-http.mjs?v=20261024-wechat-cache";
 
 const textLimit = 1024 * 1024;
 const binaryLimit = 20 * 1024 * 1024;

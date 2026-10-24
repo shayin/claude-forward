@@ -1,24 +1,24 @@
-import { renderGrid } from "./cmux-render.mjs?v=20261024-auto-scroll";
-import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-auto-scroll";
-import { createCmuxFrameOrder } from "./cmux-frame-order.mjs";
-import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs";
-import { createScrollPositions } from "./cmux-scroll-position.mjs";
+import { renderGrid } from "./cmux-render.mjs?v=20261024-wechat-cache";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-wechat-cache";
+import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261024-wechat-cache";
+import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261024-wechat-cache";
+import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-wechat-cache";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
-import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs";
-import { snapshotViewportPayload } from "./cmux-viewport.mjs";
-import { mountCmuxFiles } from "./cmux-file-view.mjs";
-import { mountCmuxBrowser } from "./cmux-browser.mjs";
-import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs";
-import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
-import { mountCmuxDrawer } from "./cmux-drawer.mjs";
-import { setConnectionIndicator } from "./cmux-status.mjs";
-import { mountCmuxCompact } from "./cmux-compact.mjs";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-touch-direction";
-import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-live-frame";
-import { commandDraft } from "./cmux-commands.mjs";
+  visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-wechat-cache";
+import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-wechat-cache";
+import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-wechat-cache";
+import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-wechat-cache";
+import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261024-wechat-cache";
+import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261024-wechat-cache";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-wechat-cache";
+import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261024-wechat-cache";
+import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261024-wechat-cache";
+import { setConnectionIndicator } from "./cmux-status.mjs?v=20261024-wechat-cache";
+import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261024-wechat-cache";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-wechat-cache";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-wechat-cache";
+import { commandDraft } from "./cmux-commands.mjs?v=20261024-wechat-cache";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -1232,3 +1232,4 @@ window.addEventListener("pageshow", event => {
 setInputState(false);
 setAdminState(false);
 connect();
+document.documentElement.dataset.cmuxStarted = "1";

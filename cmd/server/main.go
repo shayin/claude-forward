@@ -123,7 +123,7 @@ func main() {
 
 	// 静态文件服务（带 gzip 压缩）
 	fs := http.FileServer(http.Dir("web"))
-	http.Handle("/", gzipMiddleware(fs))
+	http.Handle("/", terminalStaticFiles(gzipMiddleware(fs)))
 
 	// 创建 HTTP 服务器
 	addr := fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)
