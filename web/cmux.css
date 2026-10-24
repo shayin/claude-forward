@@ -166,6 +166,7 @@ button:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
   #terminal { min-height: 0; padding: 4px 6px; }
   .keys { position: relative; gap: 3px; padding: 3px 4px; overflow: visible; }
   .keys > button { min-width: 40px; min-height: 40px; padding: 5px 6px; font-size: 13px; }
+  #returnToBottomButton { min-width: 36px; }
   .keys > .desktop-key { display: none; }
   .mobile-extra-keys { display: block; flex-shrink: 0; }
   .mobile-extra-keys summary { width: 40px; height: 40px; }

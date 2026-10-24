@@ -483,6 +483,48 @@ test("恢复非底部阅读位置后暂停新快照，回到底部才恢复", ()
   assert.equal(f.controller.holdFrame(), false);
 });
 
+test("一键回到底部清除普通屏浏览状态并定位最新行", () => {
+  const f = fixture();
+  f.touch("touchstart", 120);
+  f.setTime(2000);
+  f.touch("touchmove", 300);
+  f.flush();
+  f.touch("touchend", 300);
+  assert.equal(f.controller.isBrowsing(), true);
+  const target = f.controller.goToBottom();
+  assert.deepEqual(target, { remote: false, resume: true });
+  assert.equal(f.buffer.viewportY, f.buffer.baseY);
+  assert.equal(f.controller.isBrowsing(), false);
+  assert.equal(f.controller.holdFrame(), false);
+});
+
+test("一键回到底部定位全屏本地画面，鼠标模式交给远端处理", async () => {
+  const local = fixture();
+  local.controller.setAlternateScreen(true);
+  local.element.scrollTop = 120;
+  local.controller.restoreBrowsing();
+  assert.deepEqual(local.controller.goToBottom(), { remote: false, resume: true });
+  assert.equal(local.element.scrollTop, 370);
+  assert.equal(local.controller.holdFrame(), false);
+
+  let resolve;
+  const remote = fixture(() => new Promise(done => { resolve = done; }));
+  remote.controller.setAlternateScreen(true);
+  remote.setWritable(true);
+  remote.setMouseScroll(true);
+  remote.element.scrollHeight = remote.element.clientHeight;
+  remote.listeners.get("wheel")({
+    deltaY: -180, deltaMode: 0, altKey: false, ctrlKey: false, metaKey: false,
+    preventDefault() {}, stopImmediatePropagation() {}
+  });
+  assert.deepEqual(remote.remote, [-10]);
+  assert.deepEqual(remote.controller.goToBottom(), { remote: true, resume: false });
+  resolve();
+  await Promise.resolve();
+  assert.deepEqual(remote.remote, [-10], "回到底部由页面另发跳底请求，不能复用普通滚轮队列");
+  assert.equal(remote.controller.hasPendingRemote(), false);
+});
+
 test("全屏鼠标模式自动远端滚动，退出鼠标模式后恢复本地滚动", async () => {
   const f = fixture();
   f.controller.setAlternateScreen(true);

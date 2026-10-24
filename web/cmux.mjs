@@ -1,24 +1,24 @@
-import { renderGrid } from "./cmux-render.mjs?v=20261024-browser-session";
-import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-browser-session";
-import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261024-browser-session";
-import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261024-browser-session";
-import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-browser-session";
+import { renderGrid } from "./cmux-render.mjs?v=20261025-return-bottom";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261025-return-bottom";
+import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261025-return-bottom";
+import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261025-return-bottom";
+import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261025-return-bottom";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-browser-session";
-import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-browser-session";
-import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-browser-session";
-import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-browser-session";
-import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261024-browser-session";
-import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261024-browser-session";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-browser-session";
-import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261024-browser-session";
-import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261024-browser-session";
-import { setConnectionIndicator } from "./cmux-status.mjs?v=20261024-browser-session";
-import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261024-browser-session";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-browser-session";
-import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-browser-session";
-import { commandDraft } from "./cmux-commands.mjs?v=20261024-browser-session";
+  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261025-return-bottom";
+import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261025-return-bottom";
+import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261025-return-bottom";
+import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261025-return-bottom";
+import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261025-return-bottom";
+import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261025-return-bottom";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261025-return-bottom";
+import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261025-return-bottom";
+import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261025-return-bottom";
+import { setConnectionIndicator } from "./cmux-status.mjs?v=20261025-return-bottom";
+import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261025-return-bottom";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261025-return-bottom";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261025-return-bottom";
+import { commandDraft } from "./cmux-commands.mjs?v=20261025-return-bottom";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -43,6 +43,7 @@ const takeoverButton = document.getElementById("takeoverButton");
 const adminStatus = document.getElementById("adminStatus");
 const adminTakeoverButton = document.getElementById("adminTakeoverButton");
 const terminalElement = document.getElementById("terminal");
+const returnToBottomButton = document.getElementById("returnToBottomButton");
 const drawer = mountCmuxDrawer({
   button: sidebarToggle,
   aside: document.getElementById("cmuxSidebar"),
@@ -101,6 +102,7 @@ let lastFrame = "";
 let lastGridFrame = null;
 let remoteNeedsSnapshot = null;
 const frameOrder = createCmuxFrameOrder();
+const remoteBottomDeltaLines = 1000;
 const scrollPositions = createScrollPositions();
 let pendingPosition = false;
 let stopped = false;
@@ -124,28 +126,29 @@ const terminalFiles = document.getElementById("terminalFiles");
 const uploadAttachmentsButton = document.getElementById("uploadAttachmentsButton");
 const attachmentPreview = document.getElementById("attachmentPreview");
 let attachmentPreviewURLs = [];
+async function sendRemoteScrollRequest(lines) {
+  const client = activeClient, workspace = selectedWorkspace, surface = selectedSurface;
+  const epoch = sessionEpoch, sequence = frameOrder.issue();
+  const result = await request("scroll", {
+    workspace_id: workspace, surface_id: surface, delta_lines: lines
+  });
+  if (client === activeClient && workspace === selectedWorkspace &&
+      surface === selectedSurface && epoch === sessionEpoch) {
+    if (result?.render_grid) {
+      // 中途帧也可见；序号检查会拒绝比新快照更旧的画面。
+      applySnapshot(result, workspace, surface, epoch, sequence);
+    }
+    // 程序可能在滚动回执之后才完成重绘，空闲时补读一次最终状态。
+    remoteNeedsSnapshot = { client, workspace, surface, epoch };
+  }
+}
 const scrollController = mountCmuxScroll({
   element: terminalElement,
   terminal,
   isSelected: () => Boolean(selectedSurface && !terminalPane.hidden),
   canRemoteScroll: () => Boolean(inputOwned && selectedSurface && !terminalPane.hidden &&
     lastGridFrame?.mouseScroll),
-  sendRemoteScroll: async lines => {
-    const client = activeClient, workspace = selectedWorkspace, surface = selectedSurface;
-    const epoch = sessionEpoch, sequence = frameOrder.issue();
-    const result = await request("scroll", {
-      workspace_id: workspace, surface_id: surface, delta_lines: lines
-    });
-    if (client === activeClient && workspace === selectedWorkspace &&
-        surface === selectedSurface && epoch === sessionEpoch) {
-      if (result?.render_grid) {
-        // 中途帧也可见；序号检查会拒绝比新快照更旧的画面。
-        applySnapshot(result, workspace, surface, epoch, sequence);
-      }
-      // 程序可能在滚动回执之后才完成重绘，空闲时补读一次最终状态。
-      remoteNeedsSnapshot = { client, workspace, surface, epoch };
-    }
-  },
+  sendRemoteScroll: sendRemoteScrollRequest,
   onRemoteError: error => {
     remoteNeedsSnapshot = null;
     showStatus(`终端滚动失败：${error.message}`);
@@ -1169,6 +1172,26 @@ document.querySelectorAll("[data-key]").forEach(button => button.addEventListene
   void request("key", { surface_id: selectedSurface, key: button.dataset.key })
     .then(() => void refreshSnapshot()).catch(error => showStatus(error.message));
 }));
+returnToBottomButton.addEventListener("click", () => {
+  if (!selectedSurface) return;
+  const hadPendingPosition = pendingPosition;
+  pendingPosition = false;
+  const target = scrollController.goToBottom();
+  if (target.remote) {
+    void sendRemoteScrollRequest(remoteBottomDeltaLines)
+      .then(() => { void refreshSnapshot(true); })
+      .catch(error => {
+        showStatus(`回到底部失败：${error.message}`);
+        void refreshSnapshot(true);
+      });
+    return;
+  }
+  if (lastGridFrame?.alternateScreen && lastGridFrame?.mouseScroll) {
+    showStatus("此设备尚未取得终端输入权，无法让全屏终端回到底部");
+    return;
+  }
+  if (target.resume || hadPendingPosition) void refreshSnapshot(true);
+});
 terminal.onData(data => {
   if (!selectedSurface || !inputOwned) return;
   const input = terminalInput(data);

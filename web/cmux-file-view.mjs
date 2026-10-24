@@ -1,7 +1,7 @@
-import { filePreviewKind, readFileChunks, streamFileChunks } from "./cmux-files.mjs?v=20261024-browser-session";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-browser-session";
-import { renderSandboxedPreview } from "./cmux-preview.mjs?v=20261024-browser-session";
-import { downloadThroughHTTP } from "./cmux-download-http.mjs?v=20261024-browser-session";
+import { filePreviewKind, readFileChunks, streamFileChunks } from "./cmux-files.mjs?v=20261025-return-bottom";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261025-return-bottom";
+import { renderSandboxedPreview } from "./cmux-preview.mjs?v=20261025-return-bottom";
+import { downloadThroughHTTP } from "./cmux-download-http.mjs?v=20261025-return-bottom";
 
 const textLimit = 1024 * 1024;
 const binaryLimit = 20 * 1024 * 1024;

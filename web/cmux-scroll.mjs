@@ -119,7 +119,27 @@ export function mountCmuxScroll({
     remotePixels = 0;
     remoteLines = 0;
   };
+  const clearRemoteQueue = () => {
+    remotePixels = 0;
+    remoteLines = 0;
+  };
   const restoreBrowsing = () => { browsing = !atBottom(); };
+  const goToBottom = () => {
+    const resume = browsing || !atBottom();
+    clearRemoteQueue();
+    cancelMotion();
+    touching = false;
+    dragging = false;
+    remoteTouchActive = false;
+    wheelIntent = false;
+    browsing = false;
+    if (alternateScreen) {
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    } else {
+      terminal.scrollToLine(buffer().baseY);
+    }
+    return { remote: alternateScreen && canRemoteScroll(), resume };
+  };
   const reset = () => {
     cancelRemote();
     cancelMotion();
@@ -296,7 +316,7 @@ export function mountCmuxScroll({
       browsing = !atBottom();
     }
   });
-  return { holdFrame, reset, cancelRemote, setAlternateScreen, restoreBrowsing,
+  return { holdFrame, reset, cancelRemote, setAlternateScreen, restoreBrowsing, goToBottom,
     isBrowsing: () => browsing, isRemoteActive: () => remoteBusy || remoteLines !== 0,
     hasPendingRemote: () => remoteLines !== 0 };
 }
