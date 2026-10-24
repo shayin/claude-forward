@@ -82,7 +82,7 @@ test("cmux page title and header use terminal mode name", () => {
 test("terminal entry and dependencies use a fresh resource version", () => {
   const index = readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
-  const version = "20261024-wechat-cache";
+  const version = "20261024-scroll-inertia";
   assert.match(index, new RegExp(`location\\.assign\\('cmux\\.html\\?v=${version}'\\)`));
   for (const asset of ["cmux.mjs", "cmux.css", "lib/xterm.min.js",
     "lib/xterm-addon-fit.min.js", "lib/xterm.css"]) {

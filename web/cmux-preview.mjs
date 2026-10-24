@@ -1,5 +1,5 @@
-import { marked } from "./lib/marked/marked.esm.js?v=20261024-wechat-cache";
-import { readFileChunks } from "./cmux-files.mjs?v=20261024-wechat-cache";
+import { marked } from "./lib/marked/marked.esm.js?v=20261024-scroll-inertia";
+import { readFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia";
 
 const previewCsp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; " +
   "font-src 'none'; script-src 'none'; connect-src 'none'; form-action 'none'; " +

@@ -1,4 +1,4 @@
-import { streamFileChunks } from "./cmux-files.mjs?v=20261024-wechat-cache";
+import { streamFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia";
 
 const downloadLimit = 1 << 30;
 

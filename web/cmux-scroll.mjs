@@ -167,7 +167,11 @@ export function mountCmuxScroll({
     event.stopImmediatePropagation();
     const time = now();
     const elapsed = Math.max(1, time - lastAt);
-    velocity = Math.max(-2.5, Math.min(2.5, (lastY - touch.clientY) / elapsed));
+    const instantVelocity = Math.max(-2.5, Math.min(2.5,
+      (lastY - touch.clientY) / elapsed));
+    // 手指事件的间隔并不均匀；平滑速度，避免最后一个小抖动决定整段惯性。
+    velocity = velocity === 0 ? instantVelocity :
+      velocity * .65 + instantVelocity * .35;
     if (remoteTouchActive) {
       // cmux 的滚轮符号与手机触摸画面的移动方向相反；仅反转远程触摸。
       queueRemote(touch.clientY - lastY);
@@ -191,7 +195,9 @@ export function mountCmuxScroll({
     }
     if (remoteTouchActive) {
       touching = false;
-      if (!dragging || Math.abs(velocity) < .12) {
+      // 手指停住再抬起不是甩动；按停留时间衰减，避免迟发的 touchend 误触发惯性。
+      velocity *= Math.max(0, 1 - (now() - lastAt) / 100);
+      if (!dragging || Math.abs(velocity) < .08) {
         remoteTouchActive = false;
         return;
       }
@@ -200,9 +206,9 @@ export function mountCmuxScroll({
       const glideRemote = time => {
         const elapsed = Math.min(32, Math.max(1, time - previous));
         previous = time;
-        velocity *= Math.exp(-elapsed / 140);
+        velocity *= Math.exp(-elapsed / 220);
         if (!alternateScreen || !canRemoteScroll() ||
-            Math.abs(velocity) < .12 || time - started > 400) {
+            Math.abs(velocity) < .08 || time - started > 600) {
           remoteTouchActive = false;
           momentumFrame = 0;
           return;

@@ -293,6 +293,47 @@ test("手机远程触摸上下方向与画面一致，惯性延续同向；桌�
   assert.deepEqual(desktop.remote, [-10], "桌面滚轮的原有方向不变");
 });
 
+test("全屏快速甩动后持续减速，方向不被末尾小抖动反转", async () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setMouseScroll(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  f.touch("touchstart", 100);
+  f.setTime(20);
+  f.touch("touchmove", 220);
+  f.setTime(40);
+  f.touch("touchmove", 219);
+  f.touch("touchend", 219);
+  await Promise.resolve();
+  f.flush(56);
+  await Promise.resolve();
+  assert.ok(f.remote.length >= 2, "甩动应有后续惯性");
+  assert.ok(f.remote.every(lines => lines > 0), "末尾小抖动不能反转整段滑动");
+  f.controller.reset();
+  const count = f.remote.length;
+  f.flush(72);
+  assert.equal(f.remote.length, count, "切换终端须停止旧惯性");
+});
+
+test("全屏滑动后手指停住再松开，不产生额外惯性", async () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setMouseScroll(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  f.touch("touchstart", 100);
+  f.setTime(20);
+  f.touch("touchmove", 220);
+  f.setTime(150);
+  f.touch("touchend", 220);
+  await Promise.resolve();
+  const count = f.remote.length;
+  f.flush(166);
+  await Promise.resolve();
+  assert.equal(f.remote.length, count);
+});
+
 test("远程滚动失败时清空队列并允许下一次手势重试", async () => {
   let fail = true;
   const f = fixture(() => fail ? Promise.reject(new Error("network")) : Promise.resolve());
