@@ -79,7 +79,7 @@ test("cmux page title and header use terminal mode name", () => {
   assert.doesNotMatch(html, /云桥终端/);
 });
 
-test("滚动 ACK 只在队列空闲后取一次最终画面，切换终端后不补旧快照", async () => {
+test("滚动中途显示回放画面，空闲时补最终画面，切换终端不补旧快照", async () => {
   const source = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");
   const begin = source.indexOf("const scrollController = mountCmuxScroll({");
   const end = source.indexOf("const fileView = mountCmuxFiles(", begin);
@@ -87,6 +87,7 @@ test("滚动 ACK 只在队列空闲后取一次最终画面，切换终端后不
   let handlers;
   let pending = false;
   const snapshots = [];
+  const frames = [];
   const context = {
     terminalElement: {}, terminal: {}, terminalPane: { hidden: false },
     selectedSurface: "surface", selectedWorkspace: "workspace", activeClient: "client",
@@ -99,7 +100,7 @@ test("滚动 ACK 只在队列空闲后取一次最终画面，切换终端后不
     },
     request: async () => ({ scrolled: true }),
     refreshSnapshot: urgent => { snapshots.push(urgent); },
-    applySnapshot: () => { throw new Error("ACK 不应当作快照"); },
+    applySnapshot: result => { frames.push(result.render_grid); },
     showStatus: () => {}
   };
   vm.runInNewContext(source.slice(begin, end), context);
@@ -112,8 +113,16 @@ test("滚动 ACK 只在队列空闲后取一次最终画面，切换终端后不
   assert.deepEqual(snapshots, [true]);
   handlers.onRemoteIdle();
   assert.equal(snapshots.length, 1);
+  context.request = async () => ({ render_grid: { rows: 20 } });
+  pending = true;
+  await handlers.sendRemoteScroll(-2);
+  assert.equal(frames.length, 1, "排队期间也应显示已收到的中途画面");
+  pending = false;
+  handlers.onRemoteIdle();
+  assert.deepEqual(snapshots, [true, true], "中途画面之后仍补读最终状态");
+  context.request = async () => ({ scrolled: true });
   await handlers.sendRemoteScroll(-2);
   context.selectedSurface = "other";
   handlers.onRemoteIdle();
-  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots.length, 2);
 });

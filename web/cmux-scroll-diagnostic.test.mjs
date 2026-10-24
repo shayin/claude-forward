@@ -27,6 +27,7 @@ test("远程手势只输出一次排队、RPC、快照和写入的数值摘要",
   f.diagnostic.rpc(160, false);
   f.diagnostic.snapshot(90);
   f.diagnostic.frame(12, 24, true);
+  f.diagnostic.unchanged();
   f.diagnostic.end();
   f.tick(1500);
   f.flush();
@@ -34,7 +35,8 @@ test("远程手势只输出一次排队、RPC、快照和写入的数值摘要",
     mode: "remote", duration_ms: 1680, moves: 1, delta_px: -60,
     queued_lines_peak: 7, batches: 1, rpc_ms_total: 160, rpc_ms_max: 160,
     failures: 0, snapshot_count: 1, snapshot_ms_max: 90,
-    render_ms_max: 12, write_ms_max: 24, first_write_ms: 180, dropped_frames: 1
+    render_ms_max: 12, write_ms_max: 24, first_write_ms: 180,
+    dropped_frames: 1, unchanged_frames: 1
   }]);
   f.flush();
   assert.equal(f.reports.length, 1);

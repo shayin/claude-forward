@@ -17,7 +17,7 @@ import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
 import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-diagnostic";
-import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-live-frame";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -141,13 +141,11 @@ const scrollController = mountCmuxScroll({
     if (client === activeClient && workspace === selectedWorkspace &&
         surface === selectedSurface && epoch === sessionEpoch) {
       if (result?.render_grid) {
-        if (!scrollController.hasPendingRemote()) {
-          remoteNeedsSnapshot = null;
-          applySnapshot(result, workspace, surface, epoch, sequence);
-        }
-      } else {
-        remoteNeedsSnapshot = { client, workspace, surface, epoch };
+        // 中途帧也可见；序号检查会拒绝比新快照更旧的画面。
+        applySnapshot(result, workspace, surface, epoch, sequence);
       }
+      // 程序可能在滚动回执之后才完成重绘，空闲时补读一次最终状态。
+      remoteNeedsSnapshot = { client, workspace, surface, epoch };
     }
   },
   onRemoteError: error => {
@@ -859,7 +857,10 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     scrollDiagnostic.frame(performance.now() - renderStarted);
     scrollController.setAlternateScreen(frame.alternateScreen);
     if (lastGridFrame?.mouseScroll && !frame.mouseScroll) scrollController.cancelRemote();
-    if (sameRenderedFrame(lastGridFrame, frame, terminal.cols, terminal.rows)) return;
+    if (sameRenderedFrame(lastGridFrame, frame, terminal.cols, terminal.rows)) {
+      scrollDiagnostic.unchanged();
+      return;
+    }
     const scrollOffset = terminal.buffer.active.baseY - terminal.buffer.active.viewportY;
     const followLatest = shouldFollowLatest(terminalElement, frame.alternateScreen,
       scrollController.isBrowsing());

@@ -20,6 +20,7 @@ func TestParseCmuxScrollDiagnostic(t *testing.T) {
 		`{"mode":"other","duration_ms":10}`,
 		`{"mode":"local","duration_ms":10,"moves":-1}`,
 		`{"mode":"local","duration_ms":10,"delta_px":100001}`,
+		`{"mode":"remote","duration_ms":10,"unchanged_frames":-1}`,
 		`{`,
 	} {
 		if _, ok := parseCmuxScrollDiagnostic(json.RawMessage(raw)); ok {

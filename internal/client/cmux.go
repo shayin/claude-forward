@@ -184,6 +184,19 @@ func (m *CmuxManager) ExecuteWithLease(ctx context.Context, request protocol.Cmu
 	// Socket 密码只在本机 RPC 中使用，绝不由网页或云端传入。
 	params.Password = os.Getenv("CMUX_SOCKET_PASSWORD")
 	result, err := m.rpc(ctx, method, params)
+	if request.Action == protocol.CmuxScroll && err == nil {
+		// 本机回放通常远短于手机到 Server 的一趟往返；把中途画面搭在滚动回执上。
+		// Codex 可能异步重绘，网页仍会在滚动结束后补读一次最终快照。
+		replayCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer cancel()
+		replay, replayErr := m.rpc(replayCtx, "terminal.replay", cmuxRPCParams{
+			SurfaceID: request.SurfaceID, Password: params.Password,
+		})
+		if replayErr == nil {
+			return replay, nil
+		}
+		return result, nil
+	}
 	if !errors.Is(err, errCmuxMethodUnavailable) {
 		return result, err
 	}

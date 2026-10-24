@@ -23,7 +23,8 @@ export function createScrollDiagnostic({ send, now = () => performance.now(),
       snapshot_ms_max: Math.round(finished.snapshotMax),
       render_ms_max: Math.round(finished.renderMax),
       write_ms_max: Math.round(finished.writeMax),
-      first_write_ms: finished.firstWrite, dropped_frames: finished.dropped
+      first_write_ms: finished.firstWrite, dropped_frames: finished.dropped,
+      unchanged_frames: finished.unchanged
     });
   };
   const schedule = () => {
@@ -34,7 +35,8 @@ export function createScrollDiagnostic({ send, now = () => performance.now(),
     if (!sample) {
       sample = { mode: "remote", started: now(), moves: 0, delta: 0,
       peak: 0, batches: 0, rpc: 0, rpcMax: 0, failures: 0, snapshots: 0,
-      snapshotMax: 0, renderMax: 0, writeMax: 0, firstWrite: 0, dropped: 0, inFlight: 0 };
+      snapshotMax: 0, renderMax: 0, writeMax: 0, firstWrite: 0, dropped: 0,
+      unchanged: 0, inFlight: 0 };
       schedule();
     }
     return sample;
@@ -67,6 +69,7 @@ export function createScrollDiagnostic({ send, now = () => performance.now(),
       sample.writeMax = Math.max(sample.writeMax, writeMs);
       if (writeMs > 0 && !sample.firstWrite) sample.firstWrite = Math.round(now() - sample.started);
       if (dropped) sample.dropped++;
-    }
+    },
+    unchanged() { if (sample) sample.unchanged++; }
   };
 }
