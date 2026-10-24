@@ -1,7 +1,7 @@
-import { filePreviewKind, readFileChunks, streamFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-scroll-inertia";
-import { renderSandboxedPreview } from "./cmux-preview.mjs?v=20261024-scroll-inertia";
-import { downloadThroughHTTP } from "./cmux-download-http.mjs?v=20261024-scroll-inertia";
+import { filePreviewKind, readFileChunks, streamFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia-lite";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-scroll-inertia-lite";
+import { renderSandboxedPreview } from "./cmux-preview.mjs?v=20261024-scroll-inertia-lite";
+import { downloadThroughHTTP } from "./cmux-download-http.mjs?v=20261024-scroll-inertia-lite";
 
 const textLimit = 1024 * 1024;
 const binaryLimit = 20 * 1024 * 1024;

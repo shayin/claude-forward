@@ -206,9 +206,9 @@ export function mountCmuxScroll({
       const glideRemote = time => {
         const elapsed = Math.min(32, Math.max(1, time - previous));
         previous = time;
-        velocity *= Math.exp(-elapsed / 220);
+        velocity *= Math.exp(-elapsed / 170);
         if (!alternateScreen || !canRemoteScroll() ||
-            Math.abs(velocity) < .08 || time - started > 600) {
+            Math.abs(velocity) < .08 || time - started > 450) {
           remoteTouchActive = false;
           momentumFrame = 0;
           return;

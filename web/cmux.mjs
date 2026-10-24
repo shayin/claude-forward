@@ -1,24 +1,24 @@
-import { renderGrid } from "./cmux-render.mjs?v=20261024-scroll-inertia";
-import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-scroll-inertia";
-import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261024-scroll-inertia";
-import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261024-scroll-inertia";
-import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-scroll-inertia";
+import { renderGrid } from "./cmux-render.mjs?v=20261024-scroll-inertia-lite";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261024-scroll-inertia-lite";
+import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261024-scroll-inertia-lite";
+import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261024-scroll-inertia-lite";
+import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-scroll-inertia-lite";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-scroll-inertia";
-import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-scroll-inertia";
-import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-scroll-inertia";
-import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-scroll-inertia";
-import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261024-scroll-inertia";
-import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261024-scroll-inertia";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-scroll-inertia";
-import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261024-scroll-inertia";
-import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261024-scroll-inertia";
-import { setConnectionIndicator } from "./cmux-status.mjs?v=20261024-scroll-inertia";
-import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261024-scroll-inertia";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-inertia";
-import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-scroll-inertia";
-import { commandDraft } from "./cmux-commands.mjs?v=20261024-scroll-inertia";
+  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-scroll-inertia-lite";
+import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-scroll-inertia-lite";
+import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-scroll-inertia-lite";
+import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-scroll-inertia-lite";
+import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261024-scroll-inertia-lite";
+import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261024-scroll-inertia-lite";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261024-scroll-inertia-lite";
+import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261024-scroll-inertia-lite";
+import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261024-scroll-inertia-lite";
+import { setConnectionIndicator } from "./cmux-status.mjs?v=20261024-scroll-inertia-lite";
+import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261024-scroll-inertia-lite";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-inertia-lite";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-scroll-inertia-lite";
+import { commandDraft } from "./cmux-commands.mjs?v=20261024-scroll-inertia-lite";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");

@@ -334,6 +334,28 @@ test("全屏滑动后手指停住再松开，不产生额外惯性", async () =>
   assert.equal(f.remote.length, count);
 });
 
+test("全屏惯性在短时间内收尾，不持续拖尾滚动", async () => {
+  const f = fixture();
+  f.controller.setAlternateScreen(true);
+  f.setWritable(true);
+  f.setMouseScroll(true);
+  f.element.scrollHeight = f.element.clientHeight;
+  f.touch("touchstart", 100);
+  f.setTime(20);
+  f.touch("touchmove", 220);
+  f.touch("touchend", 220);
+  await Promise.resolve();
+  f.flush(36);
+  await Promise.resolve();
+  assert.ok(f.remote.length > 1, "短甩动仍应有惯性");
+  f.flush(486);
+  await Promise.resolve();
+  const count = f.remote.length;
+  f.flush(502);
+  await Promise.resolve();
+  assert.equal(f.remote.length, count, "超过惯性上限后不再产生滚动");
+});
+
 test("远程滚动失败时清空队列并允许下一次手势重试", async () => {
   let fail = true;
   const f = fixture(() => fail ? Promise.reject(new Error("network")) : Promise.resolve());

@@ -1,4 +1,4 @@
-import { streamFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia";
+import { streamFileChunks } from "./cmux-files.mjs?v=20261024-scroll-inertia-lite";
 
 const downloadLimit = 1 << 30;
 
