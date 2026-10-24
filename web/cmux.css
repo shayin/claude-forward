@@ -49,6 +49,7 @@ button:hover, button:focus-visible { border-color: #80a8e9; }
 .tab-actions button { font-size: 12px; padding: 5px; }
 #terminal { flex: 1; padding: 12px; overflow: auto; }
 #terminal .xterm { height: 100%; }
+.relative-scroll-hint { display: none; }
 .keys { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; border-top: 1px solid #333a4d; }
 .keys button { flex-shrink: 0; }
 #promptForm { display: flex; gap: 8px; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); }
@@ -142,6 +143,11 @@ button:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
   .tab-strip { display: flex; align-items: center; border-bottom: 1px solid #333a4d; }
   #terminalTabs { flex: 1; min-width: 0; padding: 4px 6px; }
   #terminalTabs button { min-height: 40px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .relative-scroll-hint:not([hidden]) {
+    display: block; flex-shrink: 0; padding: 3px 8px;
+    background: #252f42; color: #bed1ef; font-size: 11px; text-align: right;
+    border-bottom: 1px solid #333a4d;
+  }
   #mobileNewTabButton { display: block; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; margin-right: 6px; }
   #terminal { min-height: 0; padding: 4px 6px; }
   .keys { position: relative; gap: 4px; padding: 3px 6px; overflow: visible; }

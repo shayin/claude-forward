@@ -6,7 +6,7 @@
   <title>Claude Forward · 终端模式</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="lib/xterm.css">
-  <link rel="stylesheet" href="cmux.css">
+  <link rel="stylesheet" href="cmux.css?v=20261024-relative-scroll">
 </head>
 <body>
   <header>
@@ -68,6 +68,8 @@
         <button id="mobileNewTabButton" type="button" aria-label="新建终端 tab" title="新建终端 tab">+</button>
       </div>
       <div class="tab-actions"><button id="newTabButton" type="button">新建终端 tab</button></div>
+      <div id="terminalScrollHint" class="relative-scroll-hint" hidden aria-live="off"
+        title="仅累计本手机成功发送的滚动指令；不代表 Codex 真实位置或全部长度，电脑和其他设备的滚动不计入"></div>
       <div id="terminal"></div>
       <div class="keys" aria-label="终端快捷键">
         <button type="button" data-key="escape">Esc</button>
@@ -150,6 +152,6 @@
   </main>
   <script src="lib/xterm.min.js"></script>
   <script src="lib/xterm-addon-fit.min.js"></script>
-  <script type="module" src="cmux.mjs?v=20261024-touch-direction"></script>
+  <script type="module" src="cmux.mjs?v=20261024-relative-scroll"></script>
 </body>
 </html>
