@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
+  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
 
 test("lists only clients with an explicit cmux capability", () => {
   assert.deepEqual(cmuxClients([
@@ -51,6 +51,25 @@ test("preserves cmux native groups and flags", () => {
     { id: "g1", title: "开发", pinned: true, collapsed: false, anchorId: "w1", generatedAnchor: true },
     { id: "g2", title: "临时", pinned: false, collapsed: true, anchorId: "", generatedAnchor: false }
   ]);
+});
+
+test("group anchor is accessed through group terminal, not repeated as a member", () => {
+  const workspaces = [
+    { id: "anchor", groupId: "g" },
+    { id: "member", groupId: "g" },
+    { id: "elsewhere", groupId: "other" }
+  ];
+  for (const generatedAnchor of [true, false]) {
+    assert.deepEqual(groupMemberWorkspaces(workspaces,
+      { id: "g", anchorId: "anchor", generatedAnchor }), [workspaces[1]]);
+  }
+  assert.deepEqual(groupMemberWorkspaces(workspaces, { id: "g", anchorId: "" }),
+    workspaces.slice(0, 2));
+  assert.deepEqual(groupMemberWorkspaces(workspaces, { id: "g", anchorId: "missing" }),
+    workspaces.slice(0, 2));
+  assert.deepEqual(groupMemberWorkspaces(visibleWorkspaces([
+    { ...workspaces[0], unreadCount: 1 }, { ...workspaces[1], unreadCount: 0 }
+  ], true), { id: "g", anchorId: "anchor" }), []);
 });
 
 test("keeps selected tab when possible, otherwise uses native focus", () => {

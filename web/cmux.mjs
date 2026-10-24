@@ -5,7 +5,7 @@ import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs
 import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261024-wechat-cache";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-wechat-cache";
+  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261024-wechat-cache";
 import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261024-wechat-cache";
 import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261024-wechat-cache";
 import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261024-wechat-cache";
@@ -589,8 +589,7 @@ function renderWorkspaces() {
   const visible = visibleWorkspaces(workspaces, unreadOnly);
   const ungrouped = visible.filter(workspace => !groups.some(group => group.id === workspace.groupId));
   for (const group of groups) {
-    const members = visible.filter(item => item.groupId === group.id &&
-      !(group.generatedAnchor && group.anchorId === item.id));
+    const members = groupMemberWorkspaces(visible, group);
     if (unreadOnly && members.length === 0 &&
         !visible.some(workspace => workspace.id === group.anchorId)) continue;
     const section = document.createElement("section");

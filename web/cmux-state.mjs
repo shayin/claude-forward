@@ -59,6 +59,11 @@ export function visibleWorkspaces(workspaces, unreadOnly) {
   return unreadOnly ? list.filter(workspace => workspace.unreadCount > 0) : list;
 }
 
+export function groupMemberWorkspaces(workspaces, group) {
+  return workspaces.filter(workspace =>
+    workspace.groupId === group.id && workspace.id !== group.anchorId);
+}
+
 export function nextUnreadWorkspace(workspaces, currentId) {
   const unread = visibleWorkspaces(workspaces, true);
   if (!unread.length) return "";
