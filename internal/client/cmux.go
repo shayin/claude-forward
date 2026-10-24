@@ -122,6 +122,14 @@ func (m *CmuxManager) ExecuteWithLease(ctx context.Context, request protocol.Cmu
 		method = "mobile.workspace.list"
 	case protocol.CmuxSnapshot:
 		method, params.SurfaceID = "terminal.replay", request.SurfaceID
+		if request.ViewerID != "" && request.Columns > 0 && request.Rows > 0 {
+			// replay 携带的 viewport 在 cmux 中不是 sticky；中转服务异常退出后会自动过期，
+			// 避免随机 WebSocket viewer ID 永久把桌面终端钉在手机尺寸。
+			params.ClientID = "cf:" + request.ViewerID
+			params.ViewportColumns, params.ViewportRows = request.Columns, request.Rows
+			params.ViewportGeneration, params.DeviceName =
+				request.Generation, "Claude Forward Web"
+		}
 	case protocol.CmuxText:
 		method, params.SurfaceID, params.Text = "surface.send_text", request.SurfaceID, request.Text
 	case protocol.CmuxKey:

@@ -324,7 +324,10 @@ func ValidateCmuxRequest(request CmuxRequestPayload) error {
 			return nil
 		}
 	case CmuxSnapshot:
-		if surface {
+		if surface && (request.Columns == 0 && request.Rows == 0 && request.Generation == 0 ||
+			request.Columns >= 20 && request.Columns <= 300 &&
+				request.Rows >= 5 && request.Rows <= 120 &&
+				request.Generation >= 0 && request.Generation <= 1<<30) {
 			return nil
 		}
 	case CmuxText, CmuxPaste:

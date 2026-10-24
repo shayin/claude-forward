@@ -544,6 +544,15 @@ func (h *Hub) ForwardCmuxRequest(userID string, request protocol.CmuxRequestPayl
 			existingLease.client != client || !now.Before(existingLease.expiresAt) {
 			return false
 		}
+	case protocol.CmuxSnapshot:
+		if request.Columns > 0 || request.Rows > 0 {
+			inputLeaseKey = cmuxLeaseKey(clientID, request.SurfaceID)
+			existingLease, inputOccupied = h.cmuxLeases[inputLeaseKey]
+			if !inputOccupied || existingLease.ownerID != userID ||
+				existingLease.client != client || !now.Before(existingLease.expiresAt) {
+				return false
+			}
+		}
 	case protocol.CmuxUploadBegin, protocol.CmuxUploadChunk, protocol.CmuxUploadFinish:
 		surface := request.SurfaceID
 		if request.UploadKind == "file" {
@@ -571,7 +580,13 @@ func (h *Hub) ForwardCmuxRequest(userID string, request protocol.CmuxRequestPayl
 		request.ViewerID = userID // 忽略不可信 Web viewer_id。
 		request.LeaseSurfaceID = inputLeaseKey[len(clientID)+1:]
 		request.LeaseRevision = existingLease.revision
-		if request.Action == protocol.CmuxViewportReport ||
+		if request.Action == protocol.CmuxSnapshot {
+			if existingLease.generation == 0 {
+				existingLease.generation =
+					h.cmuxViewportGenerations[cmuxViewportKey(inputLeaseKey, userID)] + 1
+			}
+			request.Generation = existingLease.generation
+		} else if request.Action == protocol.CmuxViewportReport ||
 			request.Action == protocol.CmuxViewportClear {
 			request.Generation = h.cmuxViewportGenerations[cmuxViewportKey(inputLeaseKey, userID)] + 1
 		}
@@ -588,7 +603,8 @@ func (h *Hub) ForwardCmuxRequest(userID string, request protocol.CmuxRequestPayl
 	case client.Send <- msg:
 		if inputLeaseKey != "" {
 			existingLease.expiresAt = now.Add(cmuxLeaseDuration)
-			if request.Action == protocol.CmuxViewportReport ||
+			if request.Action == protocol.CmuxSnapshot ||
+				request.Action == protocol.CmuxViewportReport ||
 				request.Action == protocol.CmuxViewportClear {
 				existingLease.generation = request.Generation
 				h.cmuxViewportGenerations[cmuxViewportKey(inputLeaseKey, userID)] = request.Generation

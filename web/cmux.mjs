@@ -7,7 +7,7 @@ import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabe
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
   visibleWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs";
 import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs";
-import { viewportDimensions, viewportReportKey } from "./cmux-viewport.mjs";
+import { snapshotViewportPayload } from "./cmux-viewport.mjs";
 import { mountCmuxFiles } from "./cmux-file-view.mjs";
 import { mountCmuxBrowser } from "./cmux-browser.mjs";
 import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs";
@@ -106,10 +106,6 @@ let pendingPosition = false;
 let stopped = false;
 let pointerStart = null;
 let viewportTimer;
-let viewportInFlight = false;
-let viewportAfterFlight = false;
-let viewportPendingKey = "";
-let lastViewportKey = "";
 const drafts = new Map();
 const selectedTabs = new Map();
 let composerSending = false;
@@ -200,7 +196,6 @@ function setInputState(owned, occupied = false) {
   if (!inputOwned) {
     scrollController.cancelRemote();
     clearTimeout(viewportTimer);
-    lastViewportKey = "";
     setAttachmentOpen(false);
   } else if (!wasOwned) {
     scheduleViewport();
@@ -256,46 +251,7 @@ function releaseAdmin() {
 function scheduleViewport() {
   clearTimeout(viewportTimer);
   if (!inputOwned || document.visibilityState !== "visible") return;
-  viewportTimer = setTimeout(() => void reportViewport(), 180);
-}
-
-async function reportViewport() {
-  if (!inputOwned || document.visibilityState !== "visible" || !selectedSurface) return;
-  const dimensions = viewportDimensions(viewportFit.proposeDimensions());
-  if (!dimensions) return;
-  const client = activeClient;
-  const workspace = selectedWorkspace;
-  const surface = selectedSurface;
-  const epoch = sessionEpoch;
-  const key = viewportReportKey(client, surface, dimensions);
-  if (key === lastViewportKey || key === viewportPendingKey) return;
-  if (viewportInFlight) {
-    viewportAfterFlight = true;
-    return;
-  }
-  viewportInFlight = true;
-  viewportPendingKey = key;
-  try {
-    await request("viewport_report", {
-      workspace_id: workspace, surface_id: surface, ...dimensions, generation: 1
-    });
-    if (client === activeClient && surface === selectedSurface &&
-        epoch === sessionEpoch && inputOwned) {
-      lastViewportKey = key;
-      void refreshSnapshot();
-    }
-  } catch (error) {
-    if (client === activeClient && surface === selectedSurface && inputOwned) {
-      showStatus(`视口同步失败：${error.message}`);
-    }
-  } finally {
-    viewportPendingKey = "";
-    viewportInFlight = false;
-    if (viewportAfterFlight) {
-      viewportAfterFlight = false;
-      scheduleViewport();
-    }
-  }
+  viewportTimer = setTimeout(() => void refreshSnapshot(true), 180);
 }
 
 new ResizeObserver(() => {
@@ -696,7 +652,6 @@ function selectWorkspace(id) {
     releaseInput(previousSelectedSurface);
     setInputState(false);
     claimInput();
-    lastViewportKey = "";
   }
   selectedTabs.set(tabKey(id), selectedSurface);
   if (selectedSurface) localStorage.setItem(`cf_cmux_tab_${tabKey(id)}`, selectedSurface);
@@ -732,7 +687,6 @@ function renderTabs(workspace) {
         releaseInput(oldSurface);
         setInputState(false);
         claimInput();
-        lastViewportKey = "";
       }
       selectedTabs.set(tabKey(workspace.id), surface.id);
       localStorage.setItem(`cf_cmux_tab_${tabKey(workspace.id)}`, surface.id);
@@ -826,7 +780,10 @@ async function refreshSnapshot(urgent = false) {
   const sequence = frameOrder.issue();
   const started = performance.now();
   try {
-    const result = await request("snapshot", { workspace_id: workspace, surface_id: surface });
+    const result = await request("snapshot", snapshotViewportPayload(
+      workspace, surface, inputOwned, document.visibilityState === "visible",
+      viewportFit.proposeDimensions()
+    ));
     scrollDiagnostic.snapshot(performance.now() - started);
     // 请求发出后若又开始了滚动，旧快照不能覆盖正在进行的手势。
     if (!scrollController.isRemoteActive()) {

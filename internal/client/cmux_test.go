@@ -144,6 +144,29 @@ func TestCmuxManagerViewportRPCParams(t *testing.T) {
 	}
 }
 
+func TestCmuxManagerSnapshotCarriesExpiringViewport(t *testing.T) {
+	calls := make(chan cmuxRPCRequest, 1)
+	socket := fakeCmuxSocket(t, func(request cmuxRPCRequest) string {
+		calls <- request
+		return `{"ok":true,"result":{"columns":100,"rows":30}}`
+	})
+	manager := NewCmuxManager(CmuxConfig{Enabled: true, SocketPath: socket})
+	_, err := manager.Execute(context.Background(), protocol.CmuxRequestPayload{
+		RequestID: "snapshot", Action: protocol.CmuxSnapshot, SurfaceID: "surface:1",
+		ViewerID: "user-1", Columns: 100, Rows: 30, Generation: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := <-calls
+	if call.Method != "terminal.replay" || call.Params.SurfaceID != "surface:1" ||
+		call.Params.ClientID != "cf:user-1" || call.Params.ViewportColumns != 100 ||
+		call.Params.ViewportRows != 30 || call.Params.ViewportGeneration != 7 ||
+		call.Params.DeviceName != "Claude Forward Web" || call.Params.Clear {
+		t.Fatalf("snapshot viewport parameters missing: %+v", call)
+	}
+}
+
 func TestCmuxManagerSanitizesSocketError(t *testing.T) {
 	socket := fakeCmuxSocket(t, func(cmuxRPCRequest) string {
 		return `{"ok":false,"error":{"secret":"must-not-leak"}}`

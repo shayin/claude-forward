@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { viewportDimensions, viewportReportKey } from "./cmux-viewport.mjs";
+import { snapshotViewportPayload, viewportDimensions } from "./cmux-viewport.mjs";
 
 test("accepts only measurable viewport dimensions within cmux limits", () => {
   assert.deepEqual(viewportDimensions({ cols: 80, rows: 25 }), { columns: 80, rows: 25 });
@@ -11,10 +11,13 @@ test("accepts only measurable viewport dimensions within cmux limits", () => {
   assert.equal(viewportDimensions({ cols: 80, rows: 0 }), null);
 });
 
-test("a new owner or surface requires its own viewport report", () => {
-  const size = viewportDimensions({ cols: 90, rows: 28 });
-  assert.notEqual(viewportReportKey("client-a", "surface-a", size),
-    viewportReportKey("client-b", "surface-a", size));
-  assert.notEqual(viewportReportKey("client-a", "surface-a", size),
-    viewportReportKey("client-a", "surface-b", size));
+test("snapshot只在可见且拥有输入权时携带非粘性视口", () => {
+  assert.deepEqual(snapshotViewportPayload("w", "s", true, true, { cols: 90, rows: 28 }),
+    { workspace_id: "w", surface_id: "s", columns: 90, rows: 28 });
+  assert.deepEqual(snapshotViewportPayload("w", "s", false, true, { cols: 90, rows: 28 }),
+    { workspace_id: "w", surface_id: "s" });
+  assert.deepEqual(snapshotViewportPayload("w", "s", true, false, { cols: 90, rows: 28 }),
+    { workspace_id: "w", surface_id: "s" });
+  assert.deepEqual(snapshotViewportPayload("w", "s", true, true, null),
+    { workspace_id: "w", surface_id: "s" });
 });

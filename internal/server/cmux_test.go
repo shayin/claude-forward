@@ -191,6 +191,45 @@ func TestCmuxViewportRequiresOwnerAndKeepsGenerationAfterRelease(t *testing.T) {
 	}
 }
 
+func TestCmuxSnapshotViewportRequiresOwnerAndExpiresWithoutStickyReport(t *testing.T) {
+	handler, owner, client := testCmuxHandler()
+	if !handler.hub.AttachCmuxUser(owner.ID, client.ID) {
+		t.Fatal("cannot attach cmux user")
+	}
+	snapshot := protocol.CmuxRequestPayload{
+		RequestID: "snapshot", Action: protocol.CmuxSnapshot, SurfaceID: "s",
+		Columns: 90, Rows: 28,
+	}
+	message, _ := protocol.NewMessage(protocol.TypeCmuxRequest, snapshot)
+	if handler.hub.ForwardCmuxRequest(owner.ID, snapshot, message) {
+		t.Fatal("snapshot viewport acquired input without claim")
+	}
+	if _, ok := handler.hub.ClaimCmuxInput(owner.ID, "s", false); !ok {
+		t.Fatal("claim failed")
+	}
+	if (<-client.Send).Type != protocol.TypeCmuxOwnership {
+		t.Fatal("ownership marker missing")
+	}
+	message, _ = protocol.NewMessage(protocol.TypeCmuxRequest, snapshot)
+	if !handler.hub.ForwardCmuxRequest(owner.ID, snapshot, message) {
+		t.Fatal("owned snapshot viewport rejected")
+	}
+	var sent protocol.CmuxRequestPayload
+	if err := nextCmuxRequest(t, client).ParsePayload(&sent); err != nil ||
+		sent.Action != protocol.CmuxSnapshot || sent.ViewerID != owner.ID ||
+		sent.Generation != 1 || sent.Columns != 90 || sent.Rows != 28 {
+		t.Fatalf("snapshot viewport was not server-bound: %+v err=%v", sent, err)
+	}
+	if _, ok := handler.hub.ReleaseCmuxInput(owner.ID, "s"); !ok {
+		t.Fatal("release failed")
+	}
+	if err := nextCmuxRequest(t, client).ParsePayload(&sent); err != nil ||
+		sent.Action != protocol.CmuxViewportClear || sent.Generation != 2 ||
+		sent.ViewerID != owner.ID {
+		t.Fatalf("release did not clear replay viewport: %+v err=%v", sent, err)
+	}
+}
+
 func TestCmuxViewportClearRetriesFullClientQueue(t *testing.T) {
 	handler, user, client := testCmuxHandler()
 	if !handler.hub.AttachCmuxUser(user.ID, client.ID) {

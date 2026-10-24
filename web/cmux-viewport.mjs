@@ -5,6 +5,9 @@ export function viewportDimensions(proposal) {
   return { columns: Math.min(300, proposal.cols), rows: Math.min(120, proposal.rows) };
 }
 
-export function viewportReportKey(clientId, surfaceId, dimensions) {
-  return `${clientId}\x00${surfaceId}\x00${dimensions.columns}\x00${dimensions.rows}`;
+export function snapshotViewportPayload(workspaceId, surfaceId, owned, visible, proposal) {
+  const payload = { workspace_id: workspaceId, surface_id: surfaceId };
+  if (!owned || !visible) return payload;
+  const dimensions = viewportDimensions(proposal);
+  return dimensions ? { ...payload, ...dimensions } : payload;
 }
