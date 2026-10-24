@@ -18,6 +18,7 @@ import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
 import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-touch-direction";
 import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261024-live-frame";
+import { commandDraft } from "./cmux-commands.mjs";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -36,6 +37,7 @@ const mobileMedia = window.matchMedia("(max-width: 680px)");
 const promptSubmitButton = document.querySelector('#promptForm button[type="submit"]');
 const notificationsElement = document.getElementById("notifications");
 const prompt = document.getElementById("prompt");
+const commandMenu = document.getElementById("commandMenu");
 const inputStatus = document.getElementById("inputStatus");
 const takeoverButton = document.getElementById("takeoverButton");
 const adminStatus = document.getElementById("adminStatus");
@@ -209,6 +211,8 @@ function setInputState(owned, occupied = false) {
   takeoverButton.textContent = occupied ? "接管输入" : "获取输入权";
   terminalPane.classList.toggle("input-owned", inputOwned);
   prompt.disabled = !inputOwned;
+  commandMenu.classList.toggle("disabled", !inputOwned);
+  if (!inputOwned) commandMenu.open = false;
   promptSubmitButton.disabled = !inputOwned || composerSending;
   attachmentToggle.disabled = !inputOwned;
   uploadAttachmentsButton.disabled = !inputOwned;
@@ -1170,6 +1174,22 @@ document.getElementById("promptForm").addEventListener("submit", event => {
   });
 });
 prompt.addEventListener("input", () => { saveDraft(); syncPromptHeight(); });
+commandMenu.addEventListener("toggle", () => {
+  if (!inputOwned) commandMenu.open = false;
+});
+commandMenu.querySelectorAll("[data-command]").forEach(button => button.addEventListener("click", () => {
+  if (!inputOwned || !selectedSurface) return;
+  const next = commandDraft(prompt.value, button.dataset.command);
+  if (next === null) {
+    showStatus("输入框已有内容，请先发送或清空草稿");
+    return;
+  }
+  prompt.value = next;
+  saveDraft();
+  syncPromptHeight();
+  commandMenu.open = false;
+  prompt.focus();
+}));
 prompt.addEventListener("keydown", event => {
   if (!shouldSubmitComposer(event)) return;
   event.preventDefault();

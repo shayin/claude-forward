@@ -79,6 +79,20 @@ test("cmux page title and header use terminal mode name", () => {
   assert.doesNotMatch(html, /云桥终端/);
 });
 
+test("快捷菜单提供模型命令但不自动提交，按终端类型标注专属命令", () => {
+  const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");
+  assert.match(html, /id="commandMenu"/);
+  for (const command of ["/model", "/status", "/compact", "/review", "/permissions", "/clear"]) {
+    assert.match(html, new RegExp(`data-command="${command}"`));
+  }
+  assert.match(html, /选中后填入草稿，不会自动发送/);
+  assert.match(source, /const next = commandDraft\(prompt\.value, button\.dataset\.command\)/);
+  assert.match(source, /prompt\.value = next;/);
+  assert.doesNotMatch(source.slice(source.indexOf('commandMenu.querySelectorAll("[data-command]")'),
+    source.indexOf('prompt.addEventListener("keydown"')), /requestSubmit|sendReturn/);
+});
+
 test("滚动中途显示回放画面，空闲时补最终画面，切换终端不补旧快照", async () => {
   const source = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");
   const begin = source.indexOf("const scrollController = mountCmuxScroll({");

@@ -89,6 +89,21 @@
       </div>
       <form id="promptForm">
         <button id="attachmentToggle" type="button" aria-label="附件" aria-controls="terminalAttachments" aria-expanded="false">📎</button>
+        <details id="commandMenu" class="command-menu">
+          <summary aria-label="快捷指令" title="快捷指令">/</summary>
+          <div class="command-panel" aria-label="终端快捷指令">
+            <div class="command-note">选中后填入草稿，不会自动发送</div>
+            <div class="command-group">Codex / Claude</div>
+            <button type="button" data-command="/model">/model <small>切换模型</small></button>
+            <button type="button" data-command="/status">/status <small>查看状态</small></button>
+            <button type="button" data-command="/compact">/compact <small>压缩上下文</small></button>
+            <div class="command-group">Codex</div>
+            <button type="button" data-command="/review">/review <small>代码审查</small></button>
+            <button type="button" data-command="/permissions">/permissions <small>权限设置</small></button>
+            <div class="command-group">Claude</div>
+            <button type="button" data-command="/clear">/clear <small>新对话</small></button>
+          </div>
+        </details>
         <textarea id="prompt" placeholder="发送到电脑终端" rows="2"></textarea>
         <button type="submit">发送</button>
       </form>
@@ -150,6 +165,6 @@
   </main>
   <script src="lib/xterm.min.js"></script>
   <script src="lib/xterm-addon-fit.min.js"></script>
-  <script type="module" src="cmux.mjs?v=20261024-touch-direction"></script>
+  <script type="module" src="cmux.mjs?v=20261024-commands"></script>
 </body>
 </html>
