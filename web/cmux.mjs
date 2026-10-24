@@ -16,7 +16,8 @@ import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs";
 import { mountCmuxDrawer } from "./cmux-drawer.mjs";
 import { setConnectionIndicator } from "./cmux-status.mjs";
 import { mountCmuxCompact } from "./cmux-compact.mjs";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-ack-scroll";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261024-scroll-diagnostic";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -112,6 +113,15 @@ const selectedTabs = new Map();
 let composerSending = false;
 unreadOnlyElement.checked = unreadOnly;
 const pending = new Map();
+const scrollDiagnostic = createScrollDiagnostic({
+  send: payload => {
+    try {
+      if (activeClient && document.visibilityState === "visible") {
+        send({ type: "cmux_diagnostic", payload });
+      }
+    } catch { /* 诊断不得影响终端输入 */ }
+  }
+});
 const terminalFiles = document.getElementById("terminalFiles");
 const uploadAttachmentsButton = document.getElementById("uploadAttachmentsButton");
 const attachmentPreview = document.getElementById("attachmentPreview");
@@ -152,6 +162,12 @@ const scrollController = mountCmuxScroll({
         target.workspace === selectedWorkspace && target.surface === selectedSurface &&
         target.epoch === sessionEpoch) void refreshSnapshot(true);
   },
+  onGestureStart: mode => scrollDiagnostic.start(mode),
+  onGestureMove: delta => scrollDiagnostic.move(delta),
+  onGestureEnd: () => scrollDiagnostic.end(),
+  onRemoteQueue: (lines, pending) => scrollDiagnostic.queue(lines, pending),
+  onRemoteRequestStart: () => scrollDiagnostic.rpcStart(),
+  onRemoteRequest: (ms, failed) => scrollDiagnostic.rpc(ms, failed),
   onReturnToBottom: () => void refreshSnapshot(true)
 });
 const fileView = mountCmuxFiles({
@@ -806,13 +822,18 @@ async function refreshSnapshot(urgent = false) {
   const flight = { surface, workspace, epoch };
   snapshotInFlight = flight;
   const sequence = frameOrder.issue();
+  const started = performance.now();
   try {
     const result = await request("snapshot", { workspace_id: workspace, surface_id: surface });
+    scrollDiagnostic.snapshot(performance.now() - started);
     // 请求发出后若又开始了滚动，旧快照不能覆盖正在进行的手势。
     if (!scrollController.isRemoteActive()) {
       applySnapshot(result, workspace, surface, epoch, sequence);
+    } else {
+      scrollDiagnostic.frame(0, 0, true);
     }
   } catch (error) {
+    scrollDiagnostic.snapshot(performance.now() - started);
     showStatus(error.message);
   } finally {
     if (snapshotInFlight === flight) {
@@ -826,11 +847,16 @@ async function refreshSnapshot(urgent = false) {
 }
 
 function applySnapshot(result, workspace, surface, epoch, sequence) {
+  const renderStarted = performance.now();
   if (surface !== selectedSurface || workspace !== selectedWorkspace ||
       epoch !== sessionEpoch || scrollController.holdFrame() ||
-      !frameOrder.accept(sequence)) return;
+      !frameOrder.accept(sequence)) {
+    scrollDiagnostic.frame(0, 0, true);
+    return;
+  }
   if (result?.render_grid) {
     const frame = renderGrid(result.render_grid);
+    scrollDiagnostic.frame(performance.now() - renderStarted);
     scrollController.setAlternateScreen(frame.alternateScreen);
     if (lastGridFrame?.mouseScroll && !frame.mouseScroll) scrollController.cancelRemote();
     if (sameRenderedFrame(lastGridFrame, frame, terminal.cols, terminal.rows)) return;
@@ -843,6 +869,7 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     }
     if (terminal.hasSelection()) return;
     const patch = sizeChanged ? null : alternateFramePatch(lastGridFrame, frame);
+    const writeStarted = performance.now();
     lastFrame = frame.content;
     lastGridFrame = frame;
     const showLatestIfCurrent = () => {
@@ -862,12 +889,14 @@ function applySnapshot(result, workspace, surface, epoch, sequence) {
     };
     if (patch !== null) {
       if (patch) terminal.write(patch, () => {
+        scrollDiagnostic.frame(0, performance.now() - writeStarted);
         if (followLatest) showLatestIfCurrent();
       });
     } else {
       // 主屏的历史缓冲与初始全屏帧仍需完整重建；全屏后续帧只更新变化行。
       terminal.reset();
       terminal.write(`\x1b[3J${frame.content}`, () => {
+        scrollDiagnostic.frame(0, performance.now() - writeStarted);
         if (scrollOffset > 0 && !frame.alternateScreen) terminal.scrollLines(-scrollOffset);
         showLatestIfCurrent();
       });

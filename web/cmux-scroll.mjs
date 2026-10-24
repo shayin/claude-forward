@@ -2,6 +2,8 @@
 export function mountCmuxScroll({
   element, terminal, isSelected, canRemoteScroll, sendRemoteScroll, onRemoteError,
   onReturnToBottom, onRemoteActivity = () => {}, onRemoteIdle = () => {},
+  onGestureStart = () => {}, onGestureMove = () => {}, onGestureEnd = () => {},
+  onRemoteQueue = () => {}, onRemoteRequestStart = () => {}, onRemoteRequest = () => {},
   raf = requestAnimationFrame, cancelRaf = cancelAnimationFrame, now = performance.now.bind(performance)
 }) {
   let alternateScreen = false;
@@ -75,6 +77,7 @@ export function mountCmuxScroll({
     remotePixels -= lines * lineHeight();
     if (remoteLines * lines < 0) remoteLines = 0;
     remoteLines = Math.max(-32, Math.min(32, remoteLines + lines));
+    onRemoteQueue(lines, remoteLines);
     void drainRemote();
   };
   async function drainRemote() {
@@ -87,7 +90,15 @@ export function mountCmuxScroll({
         // 一次 RPC 已包含远端滚动及回放；不要把一次滑动拆成多次串行往返。
         const lines = Math.max(-32, Math.min(32, remoteLines));
         remoteLines -= lines;
-        await sendRemoteScroll(lines);
+        const started = now();
+        onRemoteRequestStart();
+        try {
+          await sendRemoteScroll(lines);
+          onRemoteRequest(now() - started, false);
+        } catch (error) {
+          onRemoteRequest(now() - started, true);
+          throw error;
+        }
       }
     } catch (error) {
       if (current === generation) {
@@ -131,6 +142,7 @@ export function mountCmuxScroll({
     if (alternateScreen) cancelRemote();
     touching = true;
     remoteTouchActive = alternateScreen && canRemoteScroll();
+    onGestureStart(remoteTouchActive ? "remote" : "local");
     dragging = false;
     const touch = event.touches[0];
     startY = lastY = touch.clientY;
@@ -150,6 +162,7 @@ export function mountCmuxScroll({
     const distance = touch.clientY - startY;
     if (!dragging && Math.abs(distance) < 4) return;
     dragging = true;
+    onGestureMove(lastY - touch.clientY);
     if (event.cancelable) event.preventDefault();
     event.stopImmediatePropagation();
     const time = now();
@@ -168,6 +181,7 @@ export function mountCmuxScroll({
   }, { capture: true, passive: false });
   element.addEventListener("touchend", event => {
     if (!touching) return;
+    onGestureEnd();
     if (dragging && event.cancelable) event.preventDefault();
     if (dragging) event.stopImmediatePropagation();
     if (dragFrame) {
@@ -230,6 +244,7 @@ export function mountCmuxScroll({
     momentumFrame = raf(glide);
   }, { capture: true, passive: false });
   element.addEventListener("touchcancel", () => {
+    if (touching) onGestureEnd();
     cancelMotion();
     if (remoteTouchActive) {
       cancelRemote();

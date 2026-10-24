@@ -281,6 +281,8 @@ func (h *Handler) handleMessage(conn *Connection, msg *protocol.Message) {
 
 	case protocol.TypeCmuxRequest:
 		h.handleCmuxRequest(conn, msg)
+	case protocol.TypeCmuxDiagnostic:
+		h.handleCmuxDiagnostic(conn, msg)
 
 	case protocol.TypeCmuxResponse:
 		h.handleCmuxResponse(conn, msg)

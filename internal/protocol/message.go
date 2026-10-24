@@ -68,15 +68,16 @@ const (
 	TypeFileResponse MessageType = "file_response"
 
 	// cmux 模式与原有聊天/旧终端链路隔离。
-	TypeCmuxAttach    MessageType = "cmux_attach"
-	TypeCmuxAttached  MessageType = "cmux_attached"
-	TypeCmuxRequest   MessageType = "cmux_request"
-	TypeCmuxResponse  MessageType = "cmux_response"
-	TypeCmuxEvent     MessageType = "cmux_event"
-	TypeCmuxClaim     MessageType = "cmux_claim"
-	TypeCmuxRelease   MessageType = "cmux_release"
-	TypeCmuxClaimed   MessageType = "cmux_claimed"
-	TypeCmuxOwnership MessageType = "cmux_ownership" // Server → Client：租约代次变更
+	TypeCmuxAttach     MessageType = "cmux_attach"
+	TypeCmuxAttached   MessageType = "cmux_attached"
+	TypeCmuxRequest    MessageType = "cmux_request"
+	TypeCmuxResponse   MessageType = "cmux_response"
+	TypeCmuxEvent      MessageType = "cmux_event"
+	TypeCmuxClaim      MessageType = "cmux_claim"
+	TypeCmuxRelease    MessageType = "cmux_release"
+	TypeCmuxClaimed    MessageType = "cmux_claimed"
+	TypeCmuxOwnership  MessageType = "cmux_ownership"  // Server → Client：租约代次变更
+	TypeCmuxDiagnostic MessageType = "cmux_diagnostic" // Web → Server：有界滚动耗时摘要
 )
 
 // Message WebSocket 消息格式

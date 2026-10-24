@@ -21,18 +21,25 @@ const (
 
 // Connection 表示一个 WebSocket 连接
 type Connection struct {
-	ID          string
-	Type        ConnType
-	Conn        *websocket.Conn
-	ClientID    string   // 如果是用户连接，记录其附加的客户端ID
-	ClientName  string   // 客户端名称（注册时设置）
-	Description string   // 客户端描述（注册时设置）
-	ClawbotID   string   // 电脑级别 ID（用于微信路由）
-	PID         int      // 客户端进程 ID
-	Path        string   // 客户端工作目录
-	Features    []string // 客户端声明的可选能力
-	Send        chan *protocol.Message
-	mu          sync.Mutex
+	ID                 string
+	Type               ConnType
+	Conn               *websocket.Conn
+	ClientID           string   // 如果是用户连接，记录其附加的客户端ID
+	ClientName         string   // 客户端名称（注册时设置）
+	Description        string   // 客户端描述（注册时设置）
+	ClawbotID          string   // 电脑级别 ID（用于微信路由）
+	PID                int      // 客户端进程 ID
+	Path               string   // 客户端工作目录
+	Features           []string // 客户端声明的可选能力
+	Send               chan *protocol.Message
+	mu                 sync.Mutex
+	lastCmuxDiagnostic time.Time // 仅用于该连接的诊断日志限速
+}
+
+func (h *Hub) HasCmuxAttachment(userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.cmuxAttachMap[userID] != ""
 }
 
 // Hub 管理所有连接

@@ -587,7 +587,13 @@ func (c *Client) handleCmuxRequest(parent context.Context, msg *protocol.Message
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+	started := time.Now()
 	result, err := c.cmux.ExecuteWithLease(ctx, request, leaseCurrent)
+	if (request.Action == protocol.CmuxScroll || request.Action == protocol.CmuxSnapshot) &&
+		(time.Since(started) >= 100*time.Millisecond || err != nil) {
+		log.Printf("[cmux-rpc] action=%s duration_ms=%d failed=%t", request.Action,
+			time.Since(started).Milliseconds(), err != nil)
+	}
 	response := protocol.CmuxResponsePayload{RequestID: request.RequestID, Result: result}
 	if err != nil {
 		response.Result = nil
