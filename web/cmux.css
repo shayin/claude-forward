@@ -190,7 +190,11 @@ button:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
   #terminal { padding: 4px; }
   .file-pane { padding: 8px 12px; }
 }
-@media (max-width: 390px) {
+@media (min-width: 375px) and (max-width: 680px) {
+  .keys > .desktop-key { display: inline-block; }
+  .mobile-extra-keys { display: none; }
+}
+@media (max-width: 374px) {
   .keys > button[data-key="tab"] { display: none; }
   .extra-tab { display: block; }
 }
