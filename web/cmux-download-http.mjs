@@ -1,4 +1,4 @@
-import { streamFileChunks } from "./cmux-files.mjs?v=20261025-return-bottom";
+import { streamFileChunks } from "./cmux-files.mjs?v=20261025-return-bottom-down";
 
 const downloadLimit = 1 << 30;
 

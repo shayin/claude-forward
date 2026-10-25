@@ -1,5 +1,5 @@
-import { marked } from "./lib/marked/marked.esm.js?v=20261025-return-bottom";
-import { readFileChunks } from "./cmux-files.mjs?v=20261025-return-bottom";
+import { marked } from "./lib/marked/marked.esm.js?v=20261025-return-bottom-down";
+import { readFileChunks } from "./cmux-files.mjs?v=20261025-return-bottom-down";
 
 const previewCsp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; " +
   "font-src 'none'; script-src 'none'; connect-src 'none'; form-action 'none'; " +

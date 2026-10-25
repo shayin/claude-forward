@@ -82,7 +82,7 @@ test("cmux page title and header use terminal mode name", () => {
 test("terminal entry and dependencies use a fresh resource version", () => {
   const index = readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
-  const version = "20261025-return-bottom";
+  const version = "20261025-return-bottom-down";
   assert.match(index, new RegExp(`location\\.assign\\('cmux\\.html\\?v=${version}'\\)`));
   for (const asset of ["cmux.mjs", "cmux.css", "lib/xterm.min.js",
     "lib/xterm-addon-fit.min.js", "lib/xterm.css"]) {
@@ -174,7 +174,7 @@ test("快捷菜单提供模型命令但不自动提交，按终端类型标注�
     source.indexOf('prompt.addEventListener("keydown"')), /requestSubmit|sendReturn/);
 });
 
-test("终端按键区提供一键回到底部，远端跳底请求保持在协议上限内", () => {
+test("终端按键区提供一键回到底部，远端跳底请求向下且保持在协议上限内", () => {
   const html = readFileSync(new URL("./cmux.html", import.meta.url), "utf8");
   const source = readFileSync(new URL("./cmux.mjs", import.meta.url), "utf8");
   const button = html.match(/<button id="returnToBottomButton"[^>]*>/)?.[0];
@@ -185,8 +185,8 @@ test("终端按键区提供一键回到底部，远端跳底请求保持在协�
   assert.match(source, /scrollController\.goToBottom\(\)/);
   assert.match(source, /sendRemoteScrollRequest\(remoteBottomDeltaLines\)/);
   assert.match(source, /pendingPosition = false/);
-  const delta = Number(source.match(/const remoteBottomDeltaLines = (\d+)/)?.[1]);
-  assert.equal(delta, 1000);
+  const delta = Number(source.match(/const remoteBottomDeltaLines = (-?\d+)/)?.[1]);
+  assert.equal(delta, -1000);
 });
 
 test("滚动中途显示回放画面，空闲时补最终画面，切换终端不补旧快照", async () => {

@@ -1,24 +1,24 @@
-import { renderGrid } from "./cmux-render.mjs?v=20261025-return-bottom";
-import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261025-return-bottom";
-import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261025-return-bottom";
-import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261025-return-bottom";
-import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261025-return-bottom";
+import { renderGrid } from "./cmux-render.mjs?v=20261025-return-bottom-down";
+import { alternateFramePatch, sameRenderedFrame } from "./cmux-frame-update.mjs?v=20261025-return-bottom-down";
+import { createCmuxFrameOrder } from "./cmux-frame-order.mjs?v=20261025-return-bottom-down";
+import { shouldFollowLatest, showLatestScreen } from "./cmux-screen-position.mjs?v=20261025-return-bottom-down";
+import { createScrollPositions } from "./cmux-scroll-position.mjs?v=20261025-return-bottom-down";
 import { chooseSurface, cmuxClients, cmuxGroups, cmuxWorkspaces, nativeAgentLabel,
   leaseForSelection, requiresCmuxInputClaim, requiresCmuxAdminClaim,
-  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261025-return-bottom";
-import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261025-return-bottom";
-import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261025-return-bottom";
-import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261025-return-bottom";
-import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261025-return-bottom";
-import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261025-return-bottom";
-import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261025-return-bottom";
-import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261025-return-bottom";
-import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261025-return-bottom";
-import { setConnectionIndicator } from "./cmux-status.mjs?v=20261025-return-bottom";
-import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261025-return-bottom";
-import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261025-return-bottom";
-import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261025-return-bottom";
-import { commandDraft } from "./cmux-commands.mjs?v=20261025-return-bottom";
+  visibleWorkspaces, groupMemberWorkspaces, nextUnreadWorkspace } from "./cmux-state.mjs?v=20261025-return-bottom-down";
+import { screenCoordinates, shouldSubmitComposer, submitTerminalDraft, terminalInput } from "./cmux-input.mjs?v=20261025-return-bottom-down";
+import { snapshotViewportPayload } from "./cmux-viewport.mjs?v=20261025-return-bottom-down";
+import { mountCmuxFiles } from "./cmux-file-view.mjs?v=20261025-return-bottom-down";
+import { mountCmuxBrowser } from "./cmux-browser.mjs?v=20261025-return-bottom-down";
+import { applyProgramEvent, programLabel, prunePrograms, topProgram } from "./cmux-programs.mjs?v=20261025-return-bottom-down";
+import { maxUploadFiles, uploadChunkedFile } from "./cmux-upload.mjs?v=20261025-return-bottom-down";
+import { bindMobileTerminalTextInput } from "./cmux-mobile-input.mjs?v=20261025-return-bottom-down";
+import { mountCmuxDrawer } from "./cmux-drawer.mjs?v=20261025-return-bottom-down";
+import { setConnectionIndicator } from "./cmux-status.mjs?v=20261025-return-bottom-down";
+import { mountCmuxCompact } from "./cmux-compact.mjs?v=20261025-return-bottom-down";
+import { mountCmuxScroll } from "./cmux-scroll.mjs?v=20261025-return-bottom-down";
+import { createScrollDiagnostic } from "./cmux-scroll-diagnostic.mjs?v=20261025-return-bottom-down";
+import { commandDraft } from "./cmux-commands.mjs?v=20261025-return-bottom-down";
 
 const status = document.getElementById("status");
 const statusIndicator = document.getElementById("statusIndicator");
@@ -102,7 +102,8 @@ let lastFrame = "";
 let lastGridFrame = null;
 let remoteNeedsSnapshot = null;
 const frameOrder = createCmuxFrameOrder();
-const remoteBottomDeltaLines = 1000;
+// Ghostty 滚轮语义为负数向下；协议限制单次最多 1000 行。
+const remoteBottomDeltaLines = -1000;
 const scrollPositions = createScrollPositions();
 let pendingPosition = false;
 let stopped = false;
